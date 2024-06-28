@@ -1,0 +1,6 @@
+{
+  "server": "m.tripulse.link",
+  "home-timeline-length": 200,
+  "max-followings": 20,
+  "from-notifications": 2
+}
