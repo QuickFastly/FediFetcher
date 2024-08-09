@@ -1,6 +1,8 @@
 {
   "server": "m.tripulse.link",
-  "home-timeline-length": 200,
-  "max-followings": 20,
-  "from-notifications": 2
+  "home-timeline-length": 80,
+  "max-followings": 10,
+  "from-notifications": 1,
+  "from-lists": 1,
+  "reply-interval-in-hours": 0
 }
