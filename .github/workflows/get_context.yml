@@ -22,7 +22,7 @@ jobs:
          cache: 'pip' # caching pip dependencies
       - run: pip install -r requirements.txt
       - name: Download all workflow run artifacts
-        uses: dawidd6/action-download-artifact@v3
+        uses: dawidd6/action-download-artifact@v6
         with:
           name: artifacts
           workflow: get_context.yml
@@ -37,7 +37,8 @@ jobs:
           name: artifacts
           path: |
             artifacts
-      - name: Checkout user's forked repository for keeping workflow alive
-        uses: actions/checkout@v4
-      - name: Keep workflow alive
-        uses: gautamkrishnar/keepalive-workflow@v1
+      # Temporarily disable these while we figure out what to do.
+      # - name: Checkout user's forked repository for keeping workflow alive
+      #   uses: actions/checkout@v4
+      # - name: Keep workflow alive
+      #   uses: gautamkrishnar/keepalive-workflow@v1

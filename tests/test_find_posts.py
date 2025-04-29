@@ -39,9 +39,11 @@ from find_posts import (
     parse_pixelfed_profile_url,
     parse_pixelfed_url,
     parse_pleroma_url,
+    parse_pleroma_uri,
     post,
     set_server_apis,
     user_has_opted_out,
+    parse_url
 )
 
 
@@ -448,14 +450,17 @@ def test_get_new_followers(
 
     server = "server"
     user_id = 1
+    access_token = "access_token"
     max = 50
     known_followers = ["follower1"]
 
     expected_result = ["follower2", "follower3"]
-    result = find_posts.get_new_followers(server, user_id, max, known_followers)
+    result = find_posts.get_new_followers(server, user_id, access_token, max, known_followers)
 
     mock_get_paginated_mastodon.assert_called_once_with(
-        f"https://{server}/api/v1/accounts/{user_id}/followers", max
+        f"https://{server}/api/v1/accounts/{user_id}/followers", max, {
+            "Authorization": f"Bearer {access_token}",
+        },
     )
     mock_filter_known_users.assert_called_once_with(
         ["follower1", "follower2", "follower3"], known_followers
@@ -473,9 +478,11 @@ def test_get_new_followings(
 ):
     mock_get_paginated_mastodon.return_value = ["user1", "user2", "user3"]
     mock_filter_known_users.return_value = ["user1", "user2"]
-    result = get_new_followings("server", "100", 5, "known_users")
+    result = get_new_followings("server", "100", "access_token", 5, "known_users")
     mock_get_paginated_mastodon.assert_called_with(
-        "https://server/api/v1/accounts/100/following", 5
+        "https://server/api/v1/accounts/100/following", 5, {
+            "Authorization": "Bearer access_token",
+        }
     )
     mock_filter_known_users.assert_called_with(
         ["user1", "user2", "user3"], "known_users"
@@ -869,6 +876,10 @@ def test_parse_pleroma_url(mock_get_redirect_url):
     result = parse_pleroma_url("https://different.example.com/objects/111")
     assert result == ("different.example.com", "789")
 
+def test_parse_pleroma_uri():
+    # Test that a valid URI is correctly parsed
+    uri = "https://friedcheese.us/notice/Arv4zBVnAR84mmkVay"
+    assert parse_pleroma_uri(uri) == ("friedcheese.us", "Arv4zBVnAR84mmkVay")    
 
 import re
 import pytest
@@ -945,6 +956,25 @@ def test_parse_peertube_url_valid():
 
     # assert that the result is as expected
     assert result == expected
+
+def test_parse_url():
+    tests = [
+        (
+            "https://video.infosec.exchange/videos/watch/56f1d0b5-d98f-4bad-b1e7-648ae074ab9d",
+            ("video.infosec.exchange", "56f1d0b5-d98f-4bad-b1e7-648ae074ab9d")
+        ),
+        (
+            "https://veedeo.org/videos/watch/a51bb77c-e1bd-4d6a-b119-95af176f6d66",
+            ("veedeo.org", "a51bb77c-e1bd-4d6a-b119-95af176f6d66")
+        ),
+        (
+            'https://foo.bar/nothing',
+            None
+        )
+    ]
+    for (url,expected) in tests:
+        result = parse_url(url, {})
+        assert result == expected
 
 
 def test_parse_peertube_url_invalid():

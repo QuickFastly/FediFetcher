@@ -20,7 +20,7 @@ import xxhash
 logger = logging.getLogger("FediFetcher")
 robotParser = urllib.robotparser.RobotFileParser()
 
-VERSION = "7.1.12"
+VERSION = "7.1.16"
 
 argparser=argparse.ArgumentParser()
 
@@ -301,9 +301,11 @@ def filter_known_users(users, known_users):
         users
     ))
 
-def get_new_followers(server, user_id, max, known_followers):
+def get_new_followers(server, user_id, access_token, max, known_followers):
     """Get any new followings for the specified user, up to the max number provided"""
-    followers = get_paginated_mastodon(f"https://{server}/api/v1/accounts/{user_id}/followers", max)
+    followers = get_paginated_mastodon(f"https://{server}/api/v1/accounts/{user_id}/followers", max, {
+        "Authorization": f"Bearer {access_token}",
+    })
 
     # Remove any we already know about
     new_followers = filter_known_users(followers, known_followers)
@@ -312,9 +314,11 @@ def get_new_followers(server, user_id, max, known_followers):
 
     return new_followers
 
-def get_new_followings(server, user_id, max, known_followings):
+def get_new_followings(server, user_id, access_token, max, known_followings):
     """Get any new followings for the specified user, up to the max number provided"""
-    following = get_paginated_mastodon(f"https://{server}/api/v1/accounts/{user_id}/following", max)
+    following = get_paginated_mastodon(f"https://{server}/api/v1/accounts/{user_id}/following", max, {
+        "Authorization": f"Bearer {access_token}",
+    })
 
     # Remove any we already know about
     new_followings = filter_known_users(following, known_followings)
@@ -363,19 +367,12 @@ def get_timeline(server, access_token, max):
 
         if response.status_code == 200:
             toots = response.json()
-        elif response.status_code == 401:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}. "
-                "Ensure your access token is correct"
-            )
-        elif response.status_code == 403:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}. "
-                "Make sure you have the read:statuses scope enabled for your access token."
-            )
         else:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}"
+            report_mastodon_error(
+                f"Error getting URL {url}",
+                response.status_code,
+                access_token,
+                "read:statuses"
             )
 
         # Paginate as needed
@@ -397,19 +394,12 @@ def get_toots(url, access_token):
 
     if response.status_code == 200:
         return response
-    elif response.status_code == 401:
-        raise Exception(
-            f"Error getting URL {url}. Status code: {response.status_code}. "
-            "It looks like your access token is incorrect."
-        )
-    elif response.status_code == 403:
-        raise Exception(
-            f"Error getting URL {url}. Status code: {response.status_code}. "
-            "Make sure you have the read:statuses scope enabled for your access token."
-        )
     else:
-        raise Exception(
-            f"Error getting URL {url}. Status code: {response.status_code}"
+        report_mastodon_error(
+            f"Error getting URL {url}",
+            response.status_code,
+            access_token,
+            "read:statuses"
         )
 
 def get_active_user_ids(server, access_token, reply_interval_hours):
@@ -428,19 +418,12 @@ def get_active_user_ids(server, access_token, reply_interval_hours):
                 if last_active > since:
                     logger.info(f"Found active user: {user['username']}")
                     yield user["id"]
-    elif resp.status_code == 401:
-        raise Exception(
-            f"Error getting user IDs on server {server}. Status code: {resp.status_code}. "
-            "Ensure your access token is correct"
-        )
-    elif resp.status_code == 403:
-        raise Exception(
-            f"Error getting user IDs on server {server}. Status code: {resp.status_code}. "
-            "Make sure you have the admin:read:accounts scope enabled for your access token."
-        )
     else:
-        raise Exception(
-            f"Error getting user IDs on server {server}. Status code: {resp.status_code}"
+        report_mastodon_error(
+            f"Error getting user IDs on server {server}",
+            resp.status_code,
+            access_token,
+            "admin:read:accounts"
         )
 
 
@@ -487,15 +470,13 @@ def get_reply_toots(user_id, server, access_token, seen_urls, reply_since):
         for toot in toots:
             logger.debug(f"Found reply toot: {toot['url']}")
         return toots
-    elif resp.status_code == 403:
-        raise Exception(
-            f"Error getting replies for user {user_id} on server {server}. Status code: {resp.status_code}. "
-            "Make sure you have the read:statuses scope enabled for your access token."
+    else:
+        report_mastodon_error(
+            f"Error getting replies for user {user_id} on server {server}",
+            resp.status_code,
+            access_token,
+            "read:statuses"
         )
-
-    raise Exception(
-        f"Error getting replies for user {user_id} on server {server}. Status code: {resp.status_code}"
-    )
 
 
 def toot_context_can_be_fetched(toot):
@@ -648,6 +629,11 @@ def parse_url(url, parsed_urls):
             parsed_urls[url] = match
 
     if url not in parsed_urls:
+        match = parse_pleroma_uri(url)
+        if match is not None:
+            parsed_urls[url] = match
+
+    if url not in parsed_urls:
         match = parse_lemmy_url(url)
         if match is not None:
             parsed_urls[url] = match
@@ -713,6 +699,13 @@ def parse_pleroma_url(url):
         if match is not None:
             return (server, match.group("toot_id"))
         return None
+    return None
+
+def parse_pleroma_uri(uri):
+    """parse a Pleroma URL and return the server and ID"""
+    match = re.match(r"https://(?P<server>[^/]+)/notice/(?P<toot_id>[^/]+)", uri)
+    if match is not None:
+        return (match.group("server"), match.group("toot_id"))
     return None
 
 def parse_pleroma_profile_url(url):
@@ -1029,20 +1022,11 @@ def get_paginated_mastodon(url, max, headers = {}, timeout = 0, max_tries = 5):
     response = get(furl, headers, timeout, max_tries)
 
     if response.status_code != 200:
-        if response.status_code == 401:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}. "
-                "Ensure your access token is correct"
-            )
-        elif response.status_code == 403:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}. "
-                "Make sure you have the correct scopes enabled for your access token."
-            )
-        else:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}"
-            )
+        report_mastodon_error(
+            f"Error getting URL {url}",
+            response.status_code,
+            headers.get('Authorization', '').replace("Bearer ", ""),
+        )
 
     result = response.json()
 
@@ -1466,6 +1450,22 @@ def fetch_timeline_context(timeline_posts, token, parsed_urls, seen_hosts, seen_
 
         add_user_posts(arguments.server, token, filter_known_users(mentioned_users, all_known_users), recently_checked_users, all_known_users, seen_urls, seen_hosts)
 
+def report_mastodon_error(error_message, error_code, access_token, required_scope = ''):
+    subline = ""
+    match error_code:
+        case 401:
+            subline = "\nIt looks like your access token is incorrect. Consider generating a new access token, and/or ensure you have copy and pasted the whole token correctly."
+        case 403:
+            if(required_scope != ""):
+                subline = f"\nAdd the {required_scope} scope to your access token, and regenerate the token."
+            else:
+                subline = "\nMake sure you have enabled the required scope(s) for your token."
+
+    raise Exception(
+        f"{error_message} with token {access_token[:+5]}{'*' * (len(access_token) - 10)}{access_token[-5:]}. Status code: {error_code} "
+        f"{subline}"
+    )
+
 if __name__ == "__main__":
     start = datetime.now()
 
@@ -1515,7 +1515,7 @@ if __name__ == "__main__":
     if tokens := [token for envvar, token in os.environ.items() if envvar.lower().startswith("ff_access_token")]:
         arguments.access_token = tokens
 
-    logger.info("Starting FediFetcher")
+    logger.info(f"Starting FediFetcher v{VERSION}")
 
     if(arguments.server == None or arguments.access_token == None):
         logger.critical("You must supply at least a server name and an access token")
@@ -1698,13 +1698,13 @@ if __name__ == "__main__":
             if arguments.max_followings > 0:
                 logger.info(f"Getting posts from last {arguments.max_followings} followings")
                 user_id = get_user_id(arguments.server, arguments.user, token)
-                followings = get_new_followings(arguments.server, user_id, arguments.max_followings, all_known_users)
+                followings = get_new_followings(arguments.server, user_id, token, arguments.max_followings, all_known_users)
                 add_user_posts(arguments.server, token, followings, known_followings, all_known_users, seen_urls, seen_hosts)
 
             if arguments.max_followers > 0:
                 logger.info(f"Getting posts from last {arguments.max_followers} followers")
                 user_id = get_user_id(arguments.server, arguments.user, token)
-                followers = get_new_followers(arguments.server, user_id, arguments.max_followers, all_known_users)
+                followers = get_new_followers(arguments.server, user_id, token, arguments.max_followers, all_known_users)
                 add_user_posts(arguments.server, token, followers, recently_checked_users, all_known_users, seen_urls, seen_hosts)
 
             if arguments.max_follow_requests > 0:
