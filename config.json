@@ -1,9 +1,8 @@
 {
   "server": "m.tripulse.link",
-  "home-timeline-length": 100,
-  "max-followings": 80,
+  "home-timeline-length": 150,
+  "max-followings": 100,
   "max-bookmarks": 20,
-  "max-favourites": 20,
   "from-notifications": 1,
   "reply-interval-in-hours": 0
 }
