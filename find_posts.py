@@ -1515,6 +1515,7 @@ if __name__ == "__main__":
             # most settings are numerical
             if envvar not in [
                 "server",
+                "user",
                 "lock_file",
                 "state_dir",
                 "on_start",
