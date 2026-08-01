@@ -4,3 +4,6 @@ venv
 .venv
 .DS_Store
 __pycache__
+.coverage
+coverage.xml
+docs/DESIGN.md
