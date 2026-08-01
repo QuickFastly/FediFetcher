@@ -18,9 +18,9 @@ jobs:
           git config user.email bot@thms.uk
           VERSION=${{ github.ref_name }}
           VERSION="${VERSION:1}"
-          if ! grep "VERSION = \"$VERSION\"" "find_posts.py"; then
-            sed -i -E 's/VERSION = "[0-9]+.[0-9]+.[0-9]+"/VERSION = "'$VERSION'"/' find_posts.py
-            git add find_posts.py 
+          if ! grep "VERSION = \"$VERSION\"" "fedifetcher/__init__.py"; then
+            sed -i -E 's/VERSION = "[0-9]+.[0-9]+.[0-9]+"/VERSION = "'$VERSION'"/' fedifetcher/__init__.py
+            git add fedifetcher/__init__.py
             git commit -m "[bot] Bump version to $VERSION"
             git push origin HEAD:main > /dev/null 2>&1
             git tag -f "v$VERSION"
