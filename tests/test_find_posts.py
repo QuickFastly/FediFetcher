@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 
@@ -640,6 +641,7 @@ def test_get_all_known_context_urls(
     toot_context_can_be_fetched,
     parse_url,
     toot_has_parseable_url,
+    monkeypatch,
 ):
     server = "test_server"
     reply_toots = [
@@ -648,10 +650,15 @@ def test_get_all_known_context_urls(
     ]
     parsed_urls = ["parsed_url_1", "parsed_url_2"]
     seen_hosts = ["seen_host_1", "seen_host_2"]
-    find_posts.recently_checked_context = {
-        "test_uri_1": {"lastSeen": datetime.now()},
-        "test_uri_2": {"lastSeen": datetime.now()},
-    }
+    monkeypatch.setattr(
+        find_posts,
+        "recently_checked_context",
+        {
+            "test_uri_1": {"lastSeen": datetime.now()},
+            "test_uri_2": {"lastSeen": datetime.now()},
+        },
+        raising=False,
+    )
 
     toot_has_parseable_url.return_value = True
     parse_url.return_value = ["parsed_url", "parsed_url_host"]
@@ -1438,14 +1445,16 @@ def test_get_paginated_mastodon():
             find_posts.get_paginated_mastodon("test-url", 10)
 
 
-def test_get_cached_robots_cached():
-    find_posts.ROBOTS_TXT = {"test_url": "test_robots_txt"}
+def test_get_cached_robots_cached(monkeypatch):
+    monkeypatch.setattr(
+        find_posts, "ROBOTS_TXT", {"test_url": "test_robots_txt"}, raising=False
+    )
     assert find_posts.get_cached_robots("test_url") == "test_robots_txt"
 
 
 @patch("find_posts.get_robots_txt_cache_path", return_value="test_cache_path")
-def test_get_cached_robots_no_cache(mock_get_path):
-    find_posts.ROBOTS_TXT = {}
+def test_get_cached_robots_no_cache(mock_get_path, monkeypatch):
+    monkeypatch.setattr(find_posts, "ROBOTS_TXT", {}, raising=False)
     assert find_posts.get_cached_robots("test_url") is None
 
 
@@ -1456,23 +1465,23 @@ def test_get_robots_from_url_cached(mock_get_cached_robots):
 
 @patch("find_posts.get")
 @patch("find_posts.get_cached_robots", return_value=None)
-def test_get_robots_from_url_exception(mock_get_cached_robots, mock_get):
+def test_get_robots_from_url_exception(mock_get_cached_robots, mock_get, monkeypatch):
     mock_get.side_effect = Exception
-    find_posts.ROBOTS_TXT = {}
+    monkeypatch.setattr(find_posts, "ROBOTS_TXT", {}, raising=False)
     assert find_posts.get_robots_from_url("test_url") is True
     assert find_posts.ROBOTS_TXT["test_url"] is True
 
 
 @patch("find_posts.get_robots_from_url")
 @patch("urllib.robotparser.RobotFileParser")
-def test_can_fetch(mock_robotFileParser, mock_get_robots_from_url):
+def test_can_fetch(mock_robotFileParser, mock_get_robots_from_url, monkeypatch):
     test_url = "http://test.com"
     test_user_agent = "test_agent"
 
     # Prepare mocks
     mock_robotsTxt = MagicMock()
     mock_robotParser = MagicMock()
-    find_posts.INSTANCE_BLOCKLIST = []
+    monkeypatch.setattr(find_posts, "INSTANCE_BLOCKLIST", [], raising=False)
 
     # Mock return values
     mock_get_robots_from_url.return_value = mock_robotsTxt
@@ -1808,17 +1817,16 @@ def test_fetch_timeline_context_with_empty_posts(
     mock_add_user_posts,
     mock_add_context_urls,
     mock_get_all_known_context_urls,
+    monkeypatch,
 ):
     # Arrange
     timeline_posts = []
     token, parsed_urls, seen_hosts = "", [], []
     seen_urls, all_known_users, recently_checked_users = [], [], []
-    arguments = type("", (), {})()
-    arguments.server = "server_test"
-    arguments.backfill_mentioned_users = 0
+    arguments = SimpleNamespace(server="server_test", backfill_mentioned_users=0)
 
     # Act
-    find_posts.arguments = arguments
+    monkeypatch.setattr(find_posts, "arguments", arguments, raising=False)
     find_posts.fetch_timeline_context(
         timeline_posts,
         token,
