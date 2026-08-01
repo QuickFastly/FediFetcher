@@ -1359,7 +1359,7 @@ def test_add_context_urls_all_fail(mock_logger, mock_add_context_url):
     context_urls = ["url1", "url2", "url3", "url4"]
     seen_urls = set()
 
-    result = add_context_urls(server, access_token, context_urls, seen_urls)
+    add_context_urls(server, access_token, context_urls, seen_urls)
 
     assert mock_add_context_url.call_count == 4
     assert len(seen_urls) == 0
@@ -1377,7 +1377,7 @@ def test_add_context_urls_all_success(mock_logger, mock_add_context_url):
     context_urls = ["url1", "url2", "url3", "url4"]
     seen_urls = set()
 
-    result = add_context_urls(server, access_token, context_urls, seen_urls)
+    add_context_urls(server, access_token, context_urls, seen_urls)
 
     assert mock_add_context_url.call_count == 4
     assert len(seen_urls) == 4

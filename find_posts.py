@@ -11,6 +11,7 @@ import time
 import urllib.robotparser
 import uuid
 from datetime import datetime, timedelta
+from typing import NoReturn
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import defusedxml.ElementTree as ET
@@ -224,6 +225,9 @@ def get_user_posts_lemmy(userName, userUrl, webserver):
             logger.error(f"Error getting user posts for user {userName}: {ex}")
         return None
 
+    logger.error(f"Unknown Lemmy profile URL type {userUrl}")
+    return None
+
 def get_user_posts_peertube(userName, webserver):
     try:
         url = f'https://{webserver}/api/v1/accounts/{userName}/videos'
@@ -393,15 +397,15 @@ def get_toots(url, access_token):
         "Authorization": f"Bearer {access_token}",
     })
 
-    if response.status_code == 200:
-        return response
-    else:
+    if response.status_code != 200:
         report_mastodon_error(
             f"Error getting URL {url}",
             response.status_code,
             access_token,
             "read:statuses"
         )
+
+    return response
 
 def get_active_user_ids(server, access_token, reply_interval_hours):
     """get all user IDs on the server that have posted a toot in the given
@@ -459,25 +463,25 @@ def get_reply_toots(user_id, server, access_token, seen_urls, reply_since):
         )
         return []
 
-    if resp.status_code == 200:
-        toots = [
-            toot
-            for toot in resp.json()
-            if toot["in_reply_to_id"] is not None
-            and toot["url"] not in seen_urls
-            and datetime.strptime(toot["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
-            > reply_since
-        ]
-        for toot in toots:
-            logger.debug(f"Found reply toot: {toot['url']}")
-        return toots
-    else:
+    if resp.status_code != 200:
         report_mastodon_error(
             f"Error getting replies for user {user_id} on server {server}",
             resp.status_code,
             access_token,
             "read:statuses"
         )
+
+    toots = [
+        toot
+        for toot in resp.json()
+        if toot["in_reply_to_id"] is not None
+        and toot["url"] not in seen_urls
+        and datetime.strptime(toot["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        > reply_since
+    ]
+    for toot in toots:
+        logger.debug(f"Found reply toot: {toot['url']}")
+    return toots
 
 
 def toot_context_can_be_fetched(toot):
@@ -875,6 +879,9 @@ def get_lemmy_comment_context(webserver, toot_id, toot_url):
             logger.error(f"Error parsing context for comment {toot_url}. Exception: {ex}")
         return []
 
+    logger.error(f"Error getting comment {toot_id} from {toot_url}. Status code: {resp.status_code}")
+    return []
+
 def get_lemmy_comments_urls(webserver, post_id, toot_url):
     """get the URLs of the comments of the given post"""
     urls = []
@@ -925,6 +932,9 @@ def get_peertube_urls(webserver, post_id, toot_url):
 
     if resp.status_code == 200:
         return [comment['url'] for comment in resp.json()['data']]
+
+    logger.error(f"Error getting comments on video {post_id} from {toot_url}. Status code: {resp.status_code}")
+    return []
 
 def get_misskey_urls(webserver, post_id, toot_url):
     """get the URLs of the comments of a given misskey post"""
@@ -1468,7 +1478,7 @@ def fetch_timeline_context(timeline_posts, token, parsed_urls, seen_hosts, seen_
 
         add_user_posts(arguments.server, token, filter_known_users(mentioned_users, all_known_users), recently_checked_users, all_known_users, seen_urls, seen_hosts)
 
-def report_mastodon_error(error_message, error_code, access_token, required_scope = ''):
+def report_mastodon_error(error_message, error_code, access_token, required_scope = '') -> NoReturn:
     subline = ""
     match error_code:
         case 401:
