@@ -1,14 +1,14 @@
 import json
 import re
 from datetime import datetime
+from unittest.mock import MagicMock, Mock, patch
+from urllib import parse
 
-import find_posts
 import pytest
 import requests
-from urllib import parse
 from requests.models import Response
-from unittest.mock import MagicMock, Mock, patch
 
+import find_posts
 from find_posts import (
     add_context_urls,
     add_user_posts,
@@ -38,14 +38,14 @@ from find_posts import (
     parse_peertube_url,
     parse_pixelfed_profile_url,
     parse_pixelfed_url,
-    parse_pleroma_url,
+    parse_pleroma_profile_url,
     parse_pleroma_uri,
+    parse_pleroma_url,
+    parse_url,
     post,
     set_server_apis,
     user_has_opted_out,
-    parse_url
 )
-
 
 
 @patch("find_posts.get_paginated_mastodon")
@@ -879,11 +879,7 @@ def test_parse_pleroma_url(mock_get_redirect_url):
 def test_parse_pleroma_uri():
     # Test that a valid URI is correctly parsed
     uri = "https://friedcheese.us/notice/Arv4zBVnAR84mmkVay"
-    assert parse_pleroma_uri(uri) == ("friedcheese.us", "Arv4zBVnAR84mmkVay")    
-
-import re
-import pytest
-from find_posts import parse_pleroma_profile_url
+    assert parse_pleroma_uri(uri) == ("friedcheese.us", "Arv4zBVnAR84mmkVay")
 
 
 def test_parse_pleroma_profile_url():

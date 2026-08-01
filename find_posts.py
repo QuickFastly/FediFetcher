@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 
-from datetime import datetime, timedelta
-from dateutil import parser
+import argparse
 import itertools
 import json
 import logging
 import os
 import re
 import sys
-import requests
 import time
-import argparse
-import uuid
-import defusedxml.ElementTree as ET
 import urllib.robotparser
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+import uuid
+from datetime import datetime, timedelta
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+import defusedxml.ElementTree as ET
+import requests
 import xxhash
+from dateutil import parser
 
 logger = logging.getLogger("FediFetcher")
 robotParser = urllib.robotparser.RobotFileParser()
@@ -1070,7 +1071,7 @@ def get_cached_robots(robots_url):
 
     robotsCachePath = get_robots_txt_cache_path(robots_url)
     if os.path.exists(robotsCachePath):
-        with open(robotsCachePath, "r", encoding="utf-8") as f:
+        with open(robotsCachePath, encoding="utf-8") as f:
             logger.debug(f"Getting robots.txt file from cache for {robots_url}.")
             robotsTxt = f.read()
             ROBOTS_TXT[robots_url] = robotsTxt
@@ -1102,7 +1103,7 @@ def get_robots_from_url(robots_url):
 
 def can_fetch(user_agent, url):
     parsed_uri = urlparse(url)
-    robots_url = '{uri.scheme}://{uri.netloc}/robots.txt'.format(uri=parsed_uri)
+    robots_url = f'{parsed_uri.scheme}://{parsed_uri.netloc}/robots.txt'
 
     if parsed_uri.netloc in INSTANCE_BLOCKLIST:
         # Never connect to these locations
@@ -1496,7 +1497,7 @@ if __name__ == "__main__":
 
     if(arguments.config != None):
         if os.path.exists(arguments.config):
-            with open(arguments.config, "r", encoding="utf-8") as f:
+            with open(arguments.config, encoding="utf-8") as f:
                 config = json.load(f)
 
             for key in config:
@@ -1539,7 +1540,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # in case someone provided the server name as url instead,
-    setattr(arguments, 'server', re.sub(r"^(https://)?([^/]*)/?$", "\\2", arguments.server))
+    arguments.server = re.sub(r"^(https://)?([^/]*)/?$", "\\2", arguments.server)
 
 
     runId = uuid.uuid4()
@@ -1558,7 +1559,7 @@ if __name__ == "__main__":
         logger.debug(f"Lock file exists at {LOCK_FILE}")
 
         try:
-            with open(LOCK_FILE, "r", encoding="utf-8") as f:
+            with open(LOCK_FILE, encoding="utf-8") as f:
                 lock_time = parser.parse(f.read())
 
             if (datetime.now() - lock_time).total_seconds() >= arguments.lock_hours * 60 * 60:
@@ -1601,22 +1602,22 @@ if __name__ == "__main__":
 
         seen_urls = OrderedSet([])
         if os.path.exists(SEEN_URLS_FILE):
-            with open(SEEN_URLS_FILE, "r", encoding="utf-8") as f:
+            with open(SEEN_URLS_FILE, encoding="utf-8") as f:
                 seen_urls = OrderedSet(f.read().splitlines())
 
         replied_toot_server_ids = {}
         if os.path.exists(REPLIED_TOOT_SERVER_IDS_FILE):
-            with open(REPLIED_TOOT_SERVER_IDS_FILE, "r", encoding="utf-8") as f:
+            with open(REPLIED_TOOT_SERVER_IDS_FILE, encoding="utf-8") as f:
                 replied_toot_server_ids = json.load(f)
 
         known_followings = OrderedSet([])
         if os.path.exists(KNOWN_FOLLOWINGS_FILE):
-            with open(KNOWN_FOLLOWINGS_FILE, "r", encoding="utf-8") as f:
+            with open(KNOWN_FOLLOWINGS_FILE, encoding="utf-8") as f:
                 known_followings = OrderedSet(f.read().splitlines())
 
         recently_checked_users = OrderedSet({})
         if os.path.exists(RECENTLY_CHECKED_USERS_FILE):
-            with open(RECENTLY_CHECKED_USERS_FILE, "r", encoding="utf-8") as f:
+            with open(RECENTLY_CHECKED_USERS_FILE, encoding="utf-8") as f:
                 recently_checked_users = OrderedSet(json.load(f))
 
         # Remove any users whose last check is too long in the past from the list
@@ -1628,7 +1629,7 @@ if __name__ == "__main__":
 
         recently_checked_context = {}
         if(os.path.exists(RECENTLY_CHECKED_CONTEXTS_FILE)):
-            with open(RECENTLY_CHECKED_CONTEXTS_FILE, "r", encoding="utf-8") as f:
+            with open(RECENTLY_CHECKED_CONTEXTS_FILE, encoding="utf-8") as f:
                 recently_checked_context = json.load(f)
 
         # Remove any toots that we haven't seen in a while, to ensure this doesn't grow indefinitely
@@ -1646,7 +1647,7 @@ if __name__ == "__main__":
         all_known_users = OrderedSet(list(known_followings) + list(recently_checked_users))
 
         if os.path.exists(SEEN_HOSTS_FILE):
-            with open(SEEN_HOSTS_FILE, "r", encoding="utf-8") as f:
+            with open(SEEN_HOSTS_FILE, encoding="utf-8") as f:
                 seen_hosts = ServerList(json.load(f))
 
             for host in list(seen_hosts):
@@ -1673,7 +1674,7 @@ if __name__ == "__main__":
 
 
         if(isinstance(arguments.access_token, str)):
-            setattr(arguments, 'access_token', [arguments.access_token])
+            arguments.access_token = [arguments.access_token]
 
         for token in arguments.access_token:
 
