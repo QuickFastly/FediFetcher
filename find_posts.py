@@ -1517,11 +1517,12 @@ if __name__ == "__main__":
             logger.critical(f"Config file {arguments.config} doesn't exist")
             sys.exit(1)
 
-    for envvar, value in os.environ.items():
+    for envvar, raw_value in os.environ.items():
         envvar = envvar.lower()
         if envvar.startswith("ff_") and not envvar.startswith("ff_access_token"):
             envvar = envvar[3:]
             # most settings are numerical
+            value: str | int = raw_value
             if envvar not in [
                 "server",
                 "user",
@@ -1534,7 +1535,7 @@ if __name__ == "__main__":
                 "log_format",
                 "instance_blocklist"
             ]:
-                value = int(value)
+                value = int(raw_value)
             setattr(arguments, envvar, value)
 
     # remains special-cased for specifying multiple tokens
@@ -1606,7 +1607,9 @@ if __name__ == "__main__":
         RECENTLY_CHECKED_CONTEXTS_FILE = os.path.join(arguments.state_dir, 'recent_context')
 
         INSTANCE_BLOCKLIST = [x.strip() for x in arguments.instance_blocklist.split(",")]
-        ROBOTS_TXT = {}
+        # A value of True or False is a verdict reached without a usable robots.txt:
+        # True when it could not be fetched, False when access was denied outright.
+        ROBOTS_TXT: dict[str, str | bool] = {}
 
         seen_urls = OrderedSet([])
         if os.path.exists(SEEN_URLS_FILE):
@@ -1650,7 +1653,7 @@ if __name__ == "__main__":
             if(userAge.total_seconds() > 7 * 24 * 60 * 60):
                 recently_checked_context.pop(tootUrl)
 
-        parsed_urls = {}
+        parsed_urls: dict[str, tuple[str, str] | None] = {}
 
         all_known_users = OrderedSet(list(known_followings) + list(recently_checked_users))
 
