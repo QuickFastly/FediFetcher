@@ -22,7 +22,8 @@ warn_redundant_casts = true
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["find_posts.py"]
+source = ["find_posts"]
 
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:"]
+fail_under = 52
