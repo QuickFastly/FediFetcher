@@ -1013,8 +1013,9 @@ def add_context_url(url, server, access_token):
         )
         return False
 
-def get_paginated_mastodon(url, max, headers = {}, timeout = 0, max_tries = 5):
+def get_paginated_mastodon(url, max, headers = None, timeout = 0, max_tries = 5):
     """Make a paginated request to mastodon"""
+    headers = headers or {}
     if(isinstance(max, int)):
         furl = f"{url}?limit={max}"
     else:
@@ -1121,9 +1122,9 @@ def can_fetch(user_agent, url):
 def user_agent():
     return f"FediFetcher/{VERSION}; +{arguments.server} (https://go.thms.uk/ff)"
 
-def get(url, headers = {}, timeout = 0, max_tries = 5, backoff = 0.5, ignore_robots_txt = False):
+def get(url, headers = None, timeout = 0, max_tries = 5, backoff = 0.5, ignore_robots_txt = False):
     """A simple wrapper to make a get request while providing our user agent, and respecting rate limits"""
-    h = headers.copy()
+    h = dict(headers or {})
     if 'User-Agent' not in h:
         h['User-Agent'] = user_agent()
 
@@ -1158,9 +1159,9 @@ def build_callback_url(url, params):
         query[key] = [str(value)]
     return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
-def post(url, json, headers = {}, timeout = 0, max_tries = 5, backoff = 0.5):
+def post(url, json, headers = None, timeout = 0, max_tries = 5, backoff = 0.5):
     """A simple wrapper to make a post request while providing our user agent, and respecting rate limits"""
-    h = headers.copy()
+    h = dict(headers or {})
     if 'User-Agent' not in h:
         h['User-Agent'] = user_agent()
 
