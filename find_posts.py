@@ -20,7 +20,6 @@ import xxhash
 from dateutil import parser
 
 logger = logging.getLogger("FediFetcher")
-robotParser = urllib.robotparser.RobotFileParser()
 
 VERSION = "7.1.21"
 
@@ -1288,11 +1287,9 @@ def get_server_from_host_meta(server):
             match = re.match(
                 r"https://(?P<server>[^/]+)/", url
             )
-            if match is not None:
-                return match.group("server")
-            else:
+            if match is None:
                 raise Exception(f'server not found in lrdd for {server}')
-                return None
+            return match.group("server")
         except Exception as ex:
             logger.error(f'Error parsing host meta for {server}. Exception: {ex}')
             return None
