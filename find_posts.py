@@ -87,7 +87,7 @@ def add_user_posts(server, access_token, followings, known_followings, all_known
         if user['acct'] not in all_known_users and not user['url'].startswith(f"https://{server}/"):
             posts = get_user_posts(user, known_followings, server, seen_hosts)
 
-            if(posts != None):
+            if(posts is not None):
                 count = 0
                 failed = 0
                 for post in posts:
@@ -110,7 +110,7 @@ def add_post_with_context(post, server, access_token, seen_urls, seen_hosts):
         if ('replies_count' in post or 'in_reply_to_id' in post) and getattr(arguments, 'backfill_with_context', 0) > 0:
             parsed_urls = {}
             parsed = parse_url(post['url'], parsed_urls)
-            if parsed == None:
+            if parsed is None:
                 return True
             known_context_urls = get_all_known_context_urls(server, [post],parsed_urls, seen_hosts)
             add_context_urls(server, access_token, known_context_urls, seen_urls)
@@ -134,7 +134,7 @@ def get_user_posts(user, known_followings, server, seen_hosts):
         return None
     parsed_url = parse_user_url(user['url'])
 
-    if parsed_url == None:
+    if parsed_url is None:
         # We are adding it as 'known' anyway, because we won't be able to fix this.
         known_followings.add(user['acct'])
         return None
@@ -334,9 +334,9 @@ def get_user_id(server, user = None, access_token = None):
 
     headers = {}
 
-    if user != None and user != '':
+    if user is not None and user != '':
         url = f"https://{server}/api/v1/accounts/lookup?acct={user}"
-    elif access_token != None:
+    elif access_token is not None:
         url = f"https://{server}/api/v1/accounts/verify_credentials"
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -1081,7 +1081,7 @@ def get_cached_robots(robots_url):
 
 def get_robots_from_url(robots_url):
     robotsTxt = get_cached_robots(robots_url)
-    if robotsTxt != None:
+    if robotsTxt is not None:
         return robotsTxt
 
     try:
@@ -1234,7 +1234,7 @@ class OrderedSet:
 
     def add(self, item, time = None):
         if item not in self._dict:
-            if(time == None):
+            if(time is None):
                 self._dict[item] = datetime.now(datetime.now().astimezone().tzinfo)
             else:
                 self._dict[item] = time
@@ -1376,7 +1376,7 @@ def get_nodeinfo(server, seen_hosts, host_meta_fallback = False):
 def get_server_info(server, seen_hosts):
     if server in seen_hosts:
         serverInfo = seen_hosts.get(server)
-        if('info' in serverInfo and serverInfo['info'] == None):
+        if('info' in serverInfo and serverInfo['info'] is None):
             return None
         return serverInfo
 
@@ -1457,7 +1457,7 @@ def fetch_timeline_context(timeline_posts, token, parsed_urls, seen_hosts, seen_
                 these_users.append(toot['account'])
                 if(len(toot['mentions'])):
                     these_users += toot['mentions']
-                if(toot['reblog'] != None):
+                if(toot['reblog'] is not None):
                     these_users.append(toot['reblog']['account'])
                     if(len(toot['reblog']['mentions'])):
                         these_users += toot['reblog']['mentions']
@@ -1495,7 +1495,7 @@ if __name__ == "__main__":
         level=arguments.log_level.upper(),
     )
 
-    if(arguments.config != None):
+    if(arguments.config is not None):
         if os.path.exists(arguments.config):
             with open(arguments.config, encoding="utf-8") as f:
                 config = json.load(f)
@@ -1535,7 +1535,7 @@ if __name__ == "__main__":
 
     logger.info(f"Starting FediFetcher v{VERSION}")
 
-    if(arguments.server == None or arguments.access_token == None):
+    if(arguments.server is None or arguments.access_token is None):
         logger.critical("You must supply at least a server name and an access token")
         sys.exit(1)
 
@@ -1545,7 +1545,7 @@ if __name__ == "__main__":
 
     runId = uuid.uuid4()
 
-    if(arguments.on_start != None and arguments.on_start != ''):
+    if(arguments.on_start is not None and arguments.on_start != ''):
         try:
             get(build_callback_url(arguments.on_start, {"rid": runId}), ignore_robots_txt = True)
         except Exception as ex:
@@ -1568,7 +1568,7 @@ if __name__ == "__main__":
             else:
                 failure_message = f"Lock file age is {datetime.now() - lock_time} - below --lock-hours={arguments.lock_hours} provided."
                 logger.critical(failure_message)
-                if(arguments.on_fail != None and arguments.on_fail != ''):
+                if(arguments.on_fail is not None and arguments.on_fail != ''):
                     try:
                         get(build_callback_url(arguments.on_fail, {"rid": runId, "ping": int((datetime.now() - start).total_seconds() * 1000), "msg": failure_message}), ignore_robots_txt = True)
                     except Exception as ex:
@@ -1578,7 +1578,7 @@ if __name__ == "__main__":
         except Exception:
             failure_message = "Cannot read logfile age - aborting."
             logger.critical(failure_message)
-            if(arguments.on_fail != None and arguments.on_fail != ''):
+            if(arguments.on_fail is not None and arguments.on_fail != ''):
                 try:
                     get(build_callback_url(arguments.on_fail, {"rid": runId, "ping": int((datetime.now() - start).total_seconds() * 1000), "msg": failure_message}), ignore_robots_txt = True)
                 except Exception as ex:
@@ -1658,7 +1658,7 @@ if __name__ == "__main__":
                     serverAge = datetime.now(serverInfo['last_checked'].tzinfo) - serverInfo['last_checked']
                     if(serverAge.total_seconds() > arguments.remember_hosts_for_days * 24 * 60 * 60 ):
                         seen_hosts.pop(host)
-                    elif('info' in serverInfo and serverInfo['info'] == None and serverAge.total_seconds() > 60 * 60 ):
+                    elif('info' in serverInfo and serverInfo['info'] is None and serverAge.total_seconds() > 60 * 60 ):
                         # Don't cache failures for more than 24 hours
                         seen_hosts.pop(host)
         else:
@@ -1772,7 +1772,7 @@ if __name__ == "__main__":
         duration = datetime.now() - start
         success_message = f"Processing finished in {duration}."
 
-        if(arguments.on_done != None and arguments.on_done != ''):
+        if(arguments.on_done is not None and arguments.on_done != ''):
             try:
                 get(build_callback_url(arguments.on_done, {"rid": runId, "ping": int(duration.total_seconds() * 1000), "msg": success_message}), ignore_robots_txt = True)
             except Exception as ex:
@@ -1784,7 +1784,7 @@ if __name__ == "__main__":
         os.remove(LOCK_FILE)
         duration = datetime.now() - start
         logger.error(f"Job failed after {duration}.")
-        if(arguments.on_fail != None and arguments.on_fail != ''):
+        if(arguments.on_fail is not None and arguments.on_fail != ''):
             try:
                 get(build_callback_url(arguments.on_fail, {"rid": runId, "ping": int(duration.total_seconds() * 1000), "msg": str(ex)}), ignore_robots_txt = True)
             except Exception as ex:

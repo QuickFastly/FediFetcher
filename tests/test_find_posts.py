@@ -217,11 +217,11 @@ def test_add_post_with_context_post_not_added(mock_functions):
 
 
 def test_user_has_opted_out():
-    assert user_has_opted_out({"note": "I love robots"}) == False
-    assert user_has_opted_out({"note": "I love robots, nobot"}) == True
-    assert user_has_opted_out({"note": "/tags/nobot"}) == True
-    assert user_has_opted_out({"indexable": False}) == True
-    assert user_has_opted_out({"discoverable": False}) == True
+    assert not user_has_opted_out({"note": "I love robots"})
+    assert user_has_opted_out({"note": "I love robots, nobot"})
+    assert user_has_opted_out({"note": "/tags/nobot"})
+    assert user_has_opted_out({"indexable": False})
+    assert user_has_opted_out({"discoverable": False})
 
 
 @pytest.fixture
@@ -266,7 +266,7 @@ def test_get_user_posts_mastodon_user_not_found(userName, webserver):
         mock_get.return_value = mock_response
 
         result = get_user_posts_mastodon(userName, webserver)
-        assert result == None
+        assert result is None
 
 
 def test_get_user_posts_mastodon_error_status_code(userName, webserver):
@@ -283,7 +283,7 @@ def test_get_user_posts_mastodon_error_status_code(userName, webserver):
         mock_get.return_value = mock_response
 
         result = get_user_posts_mastodon(userName, webserver)
-        assert result == None
+        assert result is None
 
 
 @patch("find_posts.get")
@@ -786,7 +786,7 @@ def test_parse_user_url(
 
     # Test that function logs an error and returns None when no match is found
     mock_parse_pixelfed.return_value = None
-    assert find_posts.parse_user_url(url) == None
+    assert find_posts.parse_user_url(url) is None
     mock_logger.error.assert_called_once_with(f"Error parsing Profile URL {url}")
 
 
@@ -799,7 +799,7 @@ def test_parse_mastodon_profile_url_success():
 def test_parse_mastodon_profile_url_not_match():
     url = "https://mastodon.social/username"
     result = parse_mastodon_profile_url(url)
-    assert result == None
+    assert result is None
 
 
 def test_parse_mastodon_url():
@@ -827,11 +827,11 @@ def test_parse_mastodon_uri():
 
     # Test that an invalid URI returns None
     uri = "http://invalid.uri.com"
-    assert parse_mastodon_uri(uri) == None
+    assert parse_mastodon_uri(uri) is None
 
     # Test that a URI missing elements returns None
     uri = "https://missing.elements.com/users/testuser/"
-    assert parse_mastodon_uri(uri) == None
+    assert parse_mastodon_uri(uri) is None
 
     # Test that a URI with extra elements returns the correct server and ID
     uri = "https://extra.elements.com/users/testuser/statuses/123456/7890"
@@ -839,19 +839,19 @@ def test_parse_mastodon_uri():
 
     # Test that a URI with different protocol still works
     uri = "http://still.works.com/users/testuser/statuses/123456"
-    assert parse_mastodon_uri(uri) == None
+    assert parse_mastodon_uri(uri) is None
 
     # Test that a URI without protocol doesn't work
     uri = "nowork/users/testuser/statuses/123456"
-    assert parse_mastodon_uri(uri) == None
+    assert parse_mastodon_uri(uri) is None
 
     # Test that a URI without slashes after https:// doesn't work
     uri = "https://noworkusers/testuser/statuses/123456"
-    assert parse_mastodon_uri(uri) == None
+    assert parse_mastodon_uri(uri) is None
 
     # Test the boundary case of an empty string
     uri = ""
-    assert parse_mastodon_uri(uri) == None
+    assert parse_mastodon_uri(uri) is None
 
 
 @patch("find_posts.get_redirect_url")
@@ -1027,7 +1027,7 @@ def test_parse_lemmy_url_fail_invalid_url():
 
     result = parse_lemmy_url(url)
 
-    assert result == None
+    assert result is None
 
 
 def test_parse_lemmy_url_fail_no_id():
@@ -1035,7 +1035,7 @@ def test_parse_lemmy_url_fail_no_id():
 
     result = parse_lemmy_url(url)
 
-    assert result == None
+    assert result is None
 
 
 def test_parse_lemmy_url_fail_no_protocol():
@@ -1043,7 +1043,7 @@ def test_parse_lemmy_url_fail_no_protocol():
 
     result = parse_lemmy_url(url)
 
-    assert result == None
+    assert result is None
 
 
 def test_parse_lemmy_profile_url():
@@ -1673,10 +1673,10 @@ def test_set_server_apis():
     set_server_apis(server)
 
     # check APIs support
-    assert server["mastodonApiSupport"] == True
-    assert server["misskeyApiSupport"] == False
-    assert server["lemmyApiSupport"] == False
-    assert server["peertubeApiSupport"] == False
+    assert server["mastodonApiSupport"]
+    assert not server["misskeyApiSupport"]
+    assert not server["lemmyApiSupport"]
+    assert not server["peertubeApiSupport"]
 
     # check if 'last_checked' is updated
     assert isinstance(server["last_checked"], datetime)
@@ -1690,10 +1690,10 @@ def test_set_server_apis_without_metadata():
     set_server_apis(server)
 
     # check APIs support
-    assert server["mastodonApiSupport"] == True
-    assert server["misskeyApiSupport"] == False
-    assert server["lemmyApiSupport"] == False
-    assert server["peertubeApiSupport"] == False
+    assert server["mastodonApiSupport"]
+    assert not server["misskeyApiSupport"]
+    assert not server["lemmyApiSupport"]
+    assert not server["peertubeApiSupport"]
 
     # check if 'last_checked' is updated
     assert isinstance(server["last_checked"], datetime)
@@ -1710,10 +1710,10 @@ def test_set_server_apis_with_unknown_software():
     set_server_apis(server)
 
     # check APIs support
-    assert server["mastodonApiSupport"] == False
-    assert server["misskeyApiSupport"] == False
-    assert server["lemmyApiSupport"] == False
-    assert server["peertubeApiSupport"] == False
+    assert not server["mastodonApiSupport"]
+    assert not server["misskeyApiSupport"]
+    assert not server["lemmyApiSupport"]
+    assert not server["peertubeApiSupport"]
 
     # check if 'last_checked' is updated
     assert isinstance(server["last_checked"], datetime)
