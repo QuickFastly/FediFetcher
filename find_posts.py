@@ -21,6 +21,7 @@ from dateutil import parser
 
 from fedifetcher import VERSION
 from fedifetcher.http import get_redirect_url
+from fedifetcher.state import ServerCache, TimestampedSet
 from fedifetcher.urls import (
     parse_url,
     parse_user_url,
@@ -994,80 +995,6 @@ def post(url, json, headers = None, timeout = 0, max_tries = 5, backoff = 0.5):
         raise Exception(f"Maximum number of retries exceeded for rate limited request {url}")
     return response
 
-class ServerList:
-    def __init__(self, iterable):
-        self._dict = {}
-        for item in iterable:
-            if('last_checked' in iterable[item]):
-                iterable[item]['last_checked'] = parser.parse(iterable[item]['last_checked'])
-            self.add(item, iterable[item])
-
-    def add(self, key, item):
-        self._dict[key] = item
-
-    def get(self, key):
-        return self._dict[key]
-
-    def pop(self,key):
-        return self._dict.pop(key)
-
-    def __contains__(self, item):
-        return item in self._dict
-
-    def __iter__(self):
-        return iter(self._dict)
-
-    def __len__(self):
-        return len(self._dict)
-
-    def toJSON(self):
-        return json.dumps(self._dict,default=str)
-
-
-class OrderedSet:
-    """An ordered set implementation over a dict"""
-
-    def __init__(self, iterable):
-        self._dict = {}
-        if isinstance(iterable, dict):
-            for item in iterable:
-                if isinstance(iterable[item], str):
-                    self.add(item, parser.parse(iterable[item]))
-                else:
-                    self.add(item, iterable[item])
-        else:
-            for item in iterable:
-                self.add(item)
-
-    def add(self, item, time = None):
-        if item not in self._dict:
-            if(time is None):
-                self._dict[item] = datetime.now(datetime.now().astimezone().tzinfo)
-            else:
-                self._dict[item] = time
-
-    def pop(self, item):
-        self._dict.pop(item)
-
-    def get(self, item):
-        return self._dict[item]
-
-    def update(self, iterable):
-        for item in iterable:
-            self.add(item)
-
-    def __contains__(self, item):
-        return item in self._dict
-
-    def __iter__(self):
-        return iter(self._dict)
-
-    def __len__(self):
-        return len(self._dict)
-
-    def toJSON(self):
-        return json.dumps(self._dict,default=str)
-
 def get_server_from_host_meta(server):
     url = f'https://{server}/.well-known/host-meta'
     try:
@@ -1408,32 +1335,29 @@ if __name__ == "__main__":
         # True when it could not be fetched, False when access was denied outright.
         ROBOTS_TXT: dict[str, str | bool] = {}
 
-        seen_urls = OrderedSet([])
+        seen_urls = TimestampedSet([])
         if os.path.exists(SEEN_URLS_FILE):
             with open(SEEN_URLS_FILE, encoding="utf-8") as f:
-                seen_urls = OrderedSet(f.read().splitlines())
+                seen_urls = TimestampedSet(f.read().splitlines())
 
         replied_toot_server_ids = {}
         if os.path.exists(REPLIED_TOOT_SERVER_IDS_FILE):
             with open(REPLIED_TOOT_SERVER_IDS_FILE, encoding="utf-8") as f:
                 replied_toot_server_ids = json.load(f)
 
-        known_followings = OrderedSet([])
+        known_followings = TimestampedSet([])
         if os.path.exists(KNOWN_FOLLOWINGS_FILE):
             with open(KNOWN_FOLLOWINGS_FILE, encoding="utf-8") as f:
-                known_followings = OrderedSet(f.read().splitlines())
+                known_followings = TimestampedSet(f.read().splitlines())
 
-        recently_checked_users = OrderedSet({})
+        recently_checked_users = TimestampedSet({})
         if os.path.exists(RECENTLY_CHECKED_USERS_FILE):
             with open(RECENTLY_CHECKED_USERS_FILE, encoding="utf-8") as f:
-                recently_checked_users = OrderedSet(json.load(f))
+                recently_checked_users = TimestampedSet(json.load(f))
 
-        # Remove any users whose last check is too long in the past from the list
-        for user in list(recently_checked_users):
-            lastCheck = recently_checked_users.get(user)
-            userAge = datetime.now(lastCheck.tzinfo) - lastCheck
-            if(userAge.total_seconds() > arguments.remember_users_for_hours * 60 * 60):
-                recently_checked_users.pop(user)
+        recently_checked_users.expire_older_than(
+            timedelta(hours=arguments.remember_users_for_hours)
+        )
 
         recently_checked_context = {}
         if(os.path.exists(RECENTLY_CHECKED_CONTEXTS_FILE)):
@@ -1452,25 +1376,18 @@ if __name__ == "__main__":
 
         parsed_urls: dict[str, tuple[str, str] | None] = {}
 
-        all_known_users = OrderedSet(list(known_followings) + list(recently_checked_users))
+        all_known_users = TimestampedSet(list(known_followings) + list(recently_checked_users))
 
         if os.path.exists(SEEN_HOSTS_FILE):
             with open(SEEN_HOSTS_FILE, encoding="utf-8") as f:
-                seen_hosts = ServerList(json.load(f))
+                seen_hosts = ServerCache(json.load(f))
 
-            for host in list(seen_hosts):
-                serverInfo = seen_hosts.get(host)
-                if 'peertubeApiSupport' not in serverInfo:
-                    seen_hosts.pop(host)
-                elif 'last_checked' in serverInfo:
-                    serverAge = datetime.now(serverInfo['last_checked'].tzinfo) - serverInfo['last_checked']
-                    if(serverAge.total_seconds() > arguments.remember_hosts_for_days * 24 * 60 * 60 ):
-                        seen_hosts.pop(host)
-                    elif('info' in serverInfo and serverInfo['info'] is None and serverAge.total_seconds() > 60 * 60 ):
-                        # Don't cache failures for more than 24 hours
-                        seen_hosts.pop(host)
+            seen_hosts.expire(
+                max_age=timedelta(days=arguments.remember_hosts_for_days),
+                failure_max_age=timedelta(hours=1),
+            )
         else:
-            seen_hosts = ServerList({})
+            seen_hosts = ServerCache({})
 
         # Delete any old robots.txt files so we can re-download them
         for file_name in os.listdir(arguments.state_dir):
