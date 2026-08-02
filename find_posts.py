@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import argparse
 import itertools
 import json
 import logging
@@ -20,6 +19,7 @@ import xxhash
 from dateutil import parser
 
 from fedifetcher import VERSION
+from fedifetcher.config import Config, ConfigError
 from fedifetcher.http import get_redirect_url
 from fedifetcher.state import ServerCache, TimestampedSet
 from fedifetcher.urls import (
@@ -28,38 +28,6 @@ from fedifetcher.urls import (
 )
 
 logger = logging.getLogger("FediFetcher")
-
-argparser=argparse.ArgumentParser()
-
-argparser.add_argument('-c','--config', required=False, type=str, help='Optionally provide a path to a JSON file containing configuration options. If not provided, options must be supplied using command line flags.')
-argparser.add_argument('--server', required=False, help="Required: The name of your server (e.g. `mstdn.thms.uk`)")
-argparser.add_argument('--access-token', action="append", required=False, help="Required: The access token can be generated at https://<server>/settings/applications, and must have read:search, read:statuses and admin:read:accounts scopes. You can supply this multiple times, if you want tun run it for multiple users.")
-argparser.add_argument('--reply-interval-in-hours', required = False, type=int, default=0, help="Fetch remote replies to posts that have received replies from users on your own instance in this period")
-argparser.add_argument('--home-timeline-length', required = False, type=int, default=0, help="Look for replies to posts in the API-Key owner's home timeline, up to this many posts")
-argparser.add_argument('--user', required = False, default='', help="Optional. Use together with --max-followings or --max-followers to backfill a specific user's followings/followers. If omitted, we use the account that owns the access token.")
-argparser.add_argument('--max-followings', required = False, type=int, default=0, help="Backfill posts for new accounts followed by --user. We'll backfill at most this many followings' posts")
-argparser.add_argument('--max-followers', required = False, type=int, default=0, help="Backfill posts for new accounts following --user. We'll backfill at most this many followers' posts")
-argparser.add_argument('--max-follow-requests', required = False, type=int, default=0, help="Backfill posts of the API key owners pending follow requests. We'll backfill at most this many requester's posts")
-argparser.add_argument('--max-bookmarks', required = False, type=int, default=0, help="Fetch remote replies to the API key owners Bookmarks. We'll fetch replies to at most this many bookmarks")
-argparser.add_argument('--max-favourites', required = False, type=int, default=0, help="Fetch remote replies to the API key owners Favourites. We'll fetch replies to at most this many favourites")
-argparser.add_argument('--from-notifications', required = False, type=int, default=0, help="Backfill accounts of anyone appearing in your notifications, during the last hours")
-argparser.add_argument('--remember-users-for-hours', required=False, type=int, default=24*7, help="How long to remember users that you aren't following for, before trying to backfill them again.")
-argparser.add_argument('--remember-hosts-for-days', required=False, type=int, default=30, help="How long to remember host info for, before checking again.")
-argparser.add_argument('--http-timeout', required = False, type=int, default=5, help="The timeout for any HTTP requests to your own, or other instances.")
-argparser.add_argument('--backfill-with-context', required = False, type=int, default=1, help="If enabled, we'll fetch remote replies when backfilling profiles. Set to `0` to disable.")
-argparser.add_argument('--backfill-mentioned-users', required = False, type=int, default=1, help="If enabled, we'll backfill any mentioned users when fetching remote replies to timeline posts. Set to `0` to disable.")
-argparser.add_argument('--lock-hours', required = False, type=int, default=24, help="The lock timeout in hours.")
-argparser.add_argument('--lock-file', required = False, default=None, help="Location of the lock file")
-argparser.add_argument('--state-dir', required = False, default="artifacts", help="Directory to store persistent files and possibly lock file")
-argparser.add_argument('--on-done', required = False, default=None, help="Provide a url that will be pinged when processing has completed. You can use this for 'dead man switch' monitoring of your task")
-argparser.add_argument('--on-start', required = False, default=None, help="Provide a url that will be pinged when processing is starting. You can use this for 'dead man switch' monitoring of your task")
-argparser.add_argument('--on-fail', required = False, default=None, help="Provide a url that will be pinged when processing has failed. You can use this for 'dead man switch' monitoring of your task")
-argparser.add_argument('--from-lists', required=False, type=bool, default=False, help="Set to `1` to fetch missing replies and/or backfill account from your lists. This is disabled by default.")
-argparser.add_argument('--max-list-length', required=False, type=int, default=100, help="Determines how many posts we'll fetch replies for in each list. This will be ignored, unless you also provide `from-lists = 1`. Set to `0` if you only want to backfill profiles in lists.")
-argparser.add_argument('--max-list-accounts', required=False, type=int, default=10, help="Determines how many accounts we'll backfill for in each list. This will be ignored, unless you also provide `from-lists = 1`. Set to `0` if you only want to fetch replies in lists.")
-argparser.add_argument('--log-level', required=False, default="DEBUG", help="Severity of events to log (DEBUG|INFO|WARNING|ERROR|CRITICAL)")
-argparser.add_argument('--log-format', required=False, type=str, default="%(asctime)s: %(message)s",help="Specify the log format")
-argparser.add_argument('--instance-blocklist', required=False, type=str, default="",help="A comma-separated array of instances that FediFetcher should never try to connect to")
 
 def get_notification_users(server, access_token, known_users, max_age):
     since = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(hours=max_age)
@@ -113,7 +81,7 @@ def add_post_with_context(post, server, access_token, seen_urls, seen_hosts):
     added = add_context_url(post['url'], server, access_token)
     if added is True:
         seen_urls.add(post['url'])
-        if ('replies_count' in post or 'in_reply_to_id' in post) and getattr(arguments, 'backfill_with_context', 0) > 0:
+        if ('replies_count' in post or 'in_reply_to_id' in post) and arguments.backfill_with_context:
             parsed_urls = {}
             parsed = parse_url(post['url'], parsed_urls)
             if parsed is None:
@@ -1179,7 +1147,7 @@ def fetch_timeline_context(timeline_posts, token, parsed_urls, seen_hosts, seen_
     add_context_urls(arguments.server, token, known_context_urls, seen_urls)
 
     # Backfill any post authors, and any mentioned users
-    if arguments.backfill_mentioned_users > 0:
+    if arguments.backfill_mentioned_users:
         mentioned_users = []
         cut_off = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(minutes=60)
         for toot in timeline_posts:
@@ -1218,7 +1186,12 @@ def report_mastodon_error(error_message, error_code, access_token, required_scop
 if __name__ == "__main__":
     start = datetime.now()
 
-    arguments = argparser.parse_args()
+    try:
+        arguments = Config.load()
+    except ConfigError as ex:
+        logging.basicConfig()
+        logger.critical(str(ex))
+        sys.exit(1)
 
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.basicConfig(
@@ -1226,55 +1199,9 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S %Z",
         level=arguments.log_level.upper(),
     )
-
-    if(arguments.config is not None):
-        if os.path.exists(arguments.config):
-            with open(arguments.config, encoding="utf-8") as f:
-                config = json.load(f)
-
-            for key in config:
-                setattr(arguments, key.lower().replace('-','_'), config[key])
-
-            logger.setLevel(arguments.log_level.upper())
-
-        else:
-            logger.critical(f"Config file {arguments.config} doesn't exist")
-            sys.exit(1)
-
-    for envvar, raw_value in os.environ.items():
-        envvar = envvar.lower()
-        if envvar.startswith("ff_") and not envvar.startswith("ff_access_token"):
-            envvar = envvar[3:]
-            # most settings are numerical
-            value: str | int = raw_value
-            if envvar not in [
-                "server",
-                "user",
-                "lock_file",
-                "state_dir",
-                "on_start",
-                "on_done",
-                "on_fail",
-                "log_level",
-                "log_format",
-                "instance_blocklist"
-            ]:
-                value = int(raw_value)
-            setattr(arguments, envvar, value)
-
-    # remains special-cased for specifying multiple tokens
-    if tokens := [token for envvar, token in os.environ.items() if envvar.lower().startswith("ff_access_token")]:
-        arguments.access_token = tokens
+    logger.setLevel(arguments.log_level.upper())
 
     logger.info(f"Starting FediFetcher v{VERSION}")
-
-    if(arguments.server is None or arguments.access_token is None):
-        logger.critical("You must supply at least a server name and an access token")
-        sys.exit(1)
-
-    # in case someone provided the server name as url instead,
-    arguments.server = re.sub(r"^(https://)?([^/]*)/?$", "\\2", arguments.server)
-
 
     runId = uuid.uuid4()
 
@@ -1284,9 +1211,7 @@ if __name__ == "__main__":
         except Exception as ex:
             logger.error(f"Error getting callback url: {ex}")
 
-    if arguments.lock_file is None:
-        arguments.lock_file = os.path.join(arguments.state_dir, 'lock.lock')
-    LOCK_FILE = arguments.lock_file
+    LOCK_FILE = arguments.lock_path
 
     if( os.path.exists(LOCK_FILE)):
         logger.debug(f"Lock file exists at {LOCK_FILE}")
@@ -1323,14 +1248,14 @@ if __name__ == "__main__":
 
     try:
 
-        SEEN_URLS_FILE = os.path.join(arguments.state_dir, "seen_urls")
-        REPLIED_TOOT_SERVER_IDS_FILE = os.path.join(arguments.state_dir, "replied_toot_server_ids")
-        KNOWN_FOLLOWINGS_FILE = os.path.join(arguments.state_dir, "known_followings")
-        RECENTLY_CHECKED_USERS_FILE = os.path.join(arguments.state_dir, "recently_checked_users")
-        SEEN_HOSTS_FILE = os.path.join(arguments.state_dir, "seen_hosts")
-        RECENTLY_CHECKED_CONTEXTS_FILE = os.path.join(arguments.state_dir, 'recent_context')
+        SEEN_URLS_FILE = arguments.seen_urls_file
+        REPLIED_TOOT_SERVER_IDS_FILE = arguments.replied_toot_server_ids_file
+        KNOWN_FOLLOWINGS_FILE = arguments.known_followings_file
+        RECENTLY_CHECKED_USERS_FILE = arguments.recently_checked_users_file
+        SEEN_HOSTS_FILE = arguments.seen_hosts_file
+        RECENTLY_CHECKED_CONTEXTS_FILE = arguments.recently_checked_contexts_file
 
-        INSTANCE_BLOCKLIST = [x.strip() for x in arguments.instance_blocklist.split(",")]
+        INSTANCE_BLOCKLIST = arguments.instance_blocklist
         # A value of True or False is a verdict reached without a usable robots.txt:
         # True when it could not be fetched, False when access was denied outright.
         ROBOTS_TXT: dict[str, str | bool] = {}
@@ -1398,10 +1323,7 @@ if __name__ == "__main__":
                     os.remove(file_path)
 
 
-        if(isinstance(arguments.access_token, str)):
-            arguments.access_token = [arguments.access_token]
-
-        for token in arguments.access_token:
+        for token in arguments.access_tokens:
 
             if arguments.from_lists:
                 """Pull replies from lists"""
