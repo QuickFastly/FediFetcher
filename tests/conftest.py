@@ -28,3 +28,11 @@ def reply():
 def state():
     """Real state: it is a plain bag of collections, so mocking it hides bugs"""
     return State()
+
+
+@pytest.fixture
+def home():
+    """A stand-in HomeServer: our own instance, already authenticated"""
+    home = Mock()
+    home.server = "test_server"
+    return home

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from collections.abc import Iterator, Mapping
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
+
+from dateutil import parser
 
 from fedifetcher.servers import ApiFlavour
 
@@ -95,3 +99,206 @@ class MastodonApi:
             f"Error getting context for toot {post_url}. Status code: {resp.status_code}"
         )
         return []
+
+
+def report_mastodon_error(
+    error_message: str, error_code: int, access_token: str, required_scope: str = ''
+) -> NoReturn:
+    subline = ""
+    match error_code:
+        case 401:
+            subline = "\nIt looks like your access token is incorrect. Consider generating a new access token, and/or ensure you have copy and pasted the whole token correctly."
+        case 403:
+            if(required_scope != ""):
+                subline = f"\nAdd the {required_scope} scope to your access token, and regenerate the token."
+            else:
+                subline = "\nMake sure you have enabled the required scope(s) for your token."
+
+    raise Exception(
+        f"{error_message} with token {access_token[:+5]}{'*' * (len(access_token) - 10)}{access_token[-5:]}. Status code: {error_code} "
+        f"{subline}"
+    )
+
+
+def get_paginated(
+    url: str, stop_at: int | datetime, headers: Mapping[str, str] | None = None,
+    timeout: int | None = None, max_tries: int = 5, *, http: HttpClient,
+) -> list[Any]:
+    """Follow a Mastodon collection across pages.
+
+    `stop_at` is either how many entries are wanted, or the oldest creation
+    date worth having.
+    """
+    headers = headers or {}
+    furl = f"{url}?limit={stop_at}" if isinstance(stop_at, int) else url
+
+    response = http.get(furl, headers, timeout, max_tries)
+
+    if response.status_code != 200:
+        report_mastodon_error(
+            f"Error getting URL {url}",
+            response.status_code,
+            headers.get('Authorization', '').replace("Bearer ", ""),
+        )
+
+    result = response.json()
+
+    while _wants_more(result, stop_at) and 'next' in response.links:
+        response = http.get(response.links['next']['url'], headers, timeout, max_tries)
+        if response.status_code != 200:
+            raise Exception(
+                f"Error getting URL {response.url}. \
+                    Status code: {response.status_code}"
+            )
+        page = response.json()
+        if not isinstance(page, list):
+            break
+        result += page
+
+    return result
+
+
+def _wants_more(result: list[Any], stop_at: int | datetime) -> bool:
+    if isinstance(stop_at, int):
+        return len(result) < stop_at
+    return bool(result) and parser.parse(result[-1]['created_at']) >= stop_at
+
+
+class HomeServer:
+    """Our own instance, spoken to with one of the configured access tokens"""
+
+    def __init__(self, server: str, token: str, http: HttpClient) -> None:
+        self.server = server
+        self._token = token
+        self._http = http
+        self._api = MastodonApi(server, http)
+
+    @property
+    def _auth(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"}
+
+    def _paginated(self, path: str, stop_at: int | datetime) -> list[Any]:
+        return get_paginated(
+            f"https://{self.server}{path}", stop_at, self._auth, http=self._http
+        )
+
+    def user_id(self, user: str | None = None) -> str:
+        return self._api.user_id(user, self._token)
+
+    def bookmarks(self, limit: int) -> list[Any]:
+        return self._paginated("/api/v1/bookmarks", limit)
+
+    def favourites(self, limit: int) -> list[Any]:
+        return self._paginated("/api/v1/favourites", limit)
+
+    def follow_requests(self, limit: int) -> list[Any]:
+        return self._paginated("/api/v1/follow_requests", limit)
+
+    def followers(self, user_id: str, limit: int) -> list[Any]:
+        return self._paginated(f"/api/v1/accounts/{user_id}/followers", limit)
+
+    def following(self, user_id: str, limit: int) -> list[Any]:
+        return self._paginated(f"/api/v1/accounts/{user_id}/following", limit)
+
+    def lists(self) -> list[Any]:
+        return self._paginated("/api/v1/lists", 99)
+
+    def list_timeline(self, list_id: str, limit: int) -> list[Any]:
+        return self._paginated(f"/api/v1/timelines/list/{list_id}", limit)
+
+    def list_accounts(self, list_id: str, limit: int) -> list[Any]:
+        return self._paginated(f"/api/v1/lists/{list_id}/accounts", limit)
+
+    def notification_accounts(self, since: datetime) -> list[Any]:
+        """Accounts appearing in notifications since the given time"""
+        notifications = self._paginated("/api/v1/notifications", since)
+        accounts: list[Any] = []
+        for notification in notifications:
+            when = parser.parse(notification['created_at'])
+            if when >= since and notification['account'] not in accounts:
+                accounts.append(notification['account'])
+        return accounts
+
+    def timeline(self, limit: int) -> list[Any]:
+        """Get all post in the user's home timeline"""
+        url = f"https://{self.server}/api/v1/timelines/home"
+        try:
+            response = self._toots(url)
+            toots = response.json()
+
+            # Paginate as needed
+            while len(toots) < limit and 'next' in response.links:
+                response = self._toots(response.links['next']['url'])
+                toots = toots + response.json()
+        except Exception as ex:
+            logger.error(f"Error getting timeline toots: {ex}")
+            raise
+
+        logger.info(f"Found {len(toots)} toots in timeline")
+        return toots
+
+    def _toots(self, url: str) -> Any:
+        response = self._http.get(url, headers=self._auth)
+        if response.status_code != 200:
+            report_mastodon_error(
+                f"Error getting URL {url}", response.status_code, self._token,
+                "read:statuses",
+            )
+        return response
+
+    def active_user_ids(self, reply_interval_hours: float) -> Iterator[str]:
+        """user IDs on our server that have posted in the given time interval"""
+        since = datetime.now() - timedelta(days=reply_interval_hours / 24 + 1)
+        url = f"https://{self.server}/api/v1/admin/accounts"
+        resp = self._http.get(url, headers=self._auth)
+        if resp.status_code != 200:
+            report_mastodon_error(
+                f"Error getting user IDs on server {self.server}",
+                resp.status_code, self._token, "admin:read:accounts",
+            )
+
+        for user in resp.json():
+            last_status_at = user["account"]["last_status_at"]
+            if last_status_at is not None:
+                if datetime.strptime(last_status_at, "%Y-%m-%d") > since:
+                    logger.info(f"Found active user: {user['username']}")
+                    yield user["id"]
+
+    def account_statuses(self, user_id: str) -> list[Any]:
+        """Recent posts by one of our users, replies included"""
+        url = f"https://{self.server}/api/v1/accounts/{user_id}/statuses?exclude_replies=false&limit=40"
+        resp = self._http.get(url, headers=self._auth)
+
+        if resp.status_code != 200:
+            report_mastodon_error(
+                f"Error getting replies for user {user_id} on server {self.server}",
+                resp.status_code, self._token, "read:statuses",
+            )
+        return resp.json()
+
+    def resolve(self, url: str) -> bool:
+        """Ask our server to fetch a remote post, so it appears locally"""
+        search_url = f"https://{self.server}/api/v2/search?q={url}&resolve=true&limit=1"
+
+        try:
+            resp = self._http.get(search_url, headers=self._auth)
+        except Exception as ex:
+            logger.error(
+                f"Error adding url {search_url} to server {self.server}. Exception: {ex}"
+            )
+            return False
+
+        if resp.status_code == 200:
+            logger.debug(f"Added context url {url}")
+            return True
+        elif resp.status_code == 403:
+            logger.error(
+                f"Error adding url {search_url} to server {self.server}. Status code: {resp.status_code}. "
+                "Make sure you have the read:search scope enabled for your access token."
+            )
+            return False
+        else:
+            logger.error(
+                f"Error adding url {search_url} to server {self.server}. Status code: {resp.status_code}"
+            )
+            return False

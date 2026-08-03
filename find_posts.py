@@ -5,13 +5,12 @@ import logging
 import sys
 import uuid
 from datetime import datetime, timedelta
-from typing import NoReturn
 
 from dateutil import parser
 
 from fedifetcher import VERSION
 from fedifetcher.api import client_for
-from fedifetcher.api.mastodon import MastodonApi
+from fedifetcher.api.mastodon import HomeServer
 from fedifetcher.config import Config, ConfigError
 from fedifetcher.http import HttpClient, build_callback_url
 from fedifetcher.servers import get_server_info
@@ -23,47 +22,17 @@ from fedifetcher.urls import (
 
 logger = logging.getLogger("FediFetcher")
 
-def get_notification_users(server, access_token, known_users, max_age, *, http):
-    since = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(hours=max_age)
-    notifications = get_paginated_mastodon(f"https://{server}/api/v1/notifications", since, headers={
-        "Authorization": f"Bearer {access_token}",
-    },
-        http=http)
-    notification_users = []
-    for notification in notifications:
-        notificationDate = parser.parse(notification['created_at'])
-        if(notificationDate >= since and notification['account'] not in notification_users):
-            notification_users.append(notification['account'])
-
-    new_notification_users = filter_known_users(notification_users, known_users)
-
-    logger.info(f"Found {len(notification_users)} users in notifications, {len(new_notification_users)} of which are new")
-
-    return new_notification_users
-
-def get_bookmarks(server, access_token, max, *, http):
-    return get_paginated_mastodon(f"https://{server}/api/v1/bookmarks", max, {
-        "Authorization": f"Bearer {access_token}",
-    },
-        http=http)
-
-def get_favourites(server, access_token, max, *, http):
-    return get_paginated_mastodon(f"https://{server}/api/v1/favourites", max, {
-        "Authorization": f"Bearer {access_token}",
-    },
-        http=http)
-
-def add_user_posts(server, access_token, followings, target, *, http, config, state):
+def add_user_posts(home, followings, target, *, http, config, state):
     for user in followings:
-        if user['acct'] not in state.all_known_users and not user['url'].startswith(f"https://{server}/"):
-            posts = get_user_posts(user, target, server, http=http, state=state)
+        if user['acct'] not in state.all_known_users and not user['url'].startswith(f"https://{home.server}/"):
+            posts = get_user_posts(user, target, home.server, http=http, state=state)
 
             if(posts is not None):
                 count = 0
                 failed = 0
                 for post in posts:
                     if post.get('reblog') is None and post.get('renoteId') is None and post.get('url') is not None and post.get('url') not in state.seen_urls:
-                        added = add_post_with_context(post, server, access_token, http=http, config=config, state=state)
+                        added = add_post_with_context(post, home, http=http, config=config, state=state)
                         if added is True:
                             state.seen_urls.add(post['url'])
                             count += 1
@@ -74,16 +43,16 @@ def add_user_posts(server, access_token, followings, target, *, http, config, st
                     target.add(user['acct'])
                     state.all_known_users.add(user['acct'])
 
-def add_post_with_context(post, server, access_token, *, http, config, state):
-    added = add_context_url(post['url'], server, access_token, http=http)
+def add_post_with_context(post, home, *, http, config, state):
+    added = home.resolve(post['url'])
     if added is True:
         state.seen_urls.add(post['url'])
         if ('replies_count' in post or 'in_reply_to_id' in post) and config.backfill_with_context:
             parsed = parse_url(post['url'], state.parsed_urls, http)
             if parsed is None:
                 return True
-            known_context_urls = get_all_known_context_urls(server, [post], http=http, state=state)
-            add_context_urls(server, access_token, known_context_urls, http=http, state=state)
+            known_context_urls = get_all_known_context_urls(home.server, [post], http=http, state=state)
+            add_context_urls(home, known_context_urls, state=state)
         return True
 
     return False
@@ -125,135 +94,18 @@ def get_user_posts(user, target, server, *, http, state):
 
     return client.fetch_user_posts(parsed_url[1], user['url'])
 
-def get_new_follow_requests(server, access_token, max, known_followings, *, http):
-    """Get any new follow requests for the specified user, up to the max number provided"""
-
-    follow_requests = get_paginated_mastodon(f"https://{server}/api/v1/follow_requests", max, {
-        "Authorization": f"Bearer {access_token}",
-    },
-        http=http)
-
-    # Remove any we already know about
-    new_follow_requests = filter_known_users(follow_requests, known_followings)
-
-    logger.info(f"Got {len(follow_requests)} follow_requests, {len(new_follow_requests)} of which are new")
-
-    return new_follow_requests
-
 def filter_known_users(users, known_users):
     return list(filter(
         lambda user: user['acct'] not in known_users,
         users
     ))
 
-def get_new_followers(server, user_id, access_token, max, known_followers, *, http):
-    """Get any new followings for the specified user, up to the max number provided"""
-    followers = get_paginated_mastodon(f"https://{server}/api/v1/accounts/{user_id}/followers", max, {
-        "Authorization": f"Bearer {access_token}",
-    },
-        http=http)
-
-    # Remove any we already know about
-    new_followers = filter_known_users(followers, known_followers)
-
-    logger.info(f"Got {len(followers)} followers, {len(new_followers)} of which are new")
-
-    return new_followers
-
-def get_new_followings(server, user_id, access_token, max, known_followings, *, http):
-    """Get any new followings for the specified user, up to the max number provided"""
-    following = get_paginated_mastodon(f"https://{server}/api/v1/accounts/{user_id}/following", max, {
-        "Authorization": f"Bearer {access_token}",
-    },
-        http=http)
-
-    # Remove any we already know about
-    new_followings = filter_known_users(following, known_followings)
-
-    logger.info(f"Got {len(following)} followings, {len(new_followings)} of which are new")
-
-    return new_followings
-
-
-def get_timeline(server, access_token, max, *, http):
-    """Get all post in the user's home timeline"""
-
-    url = f"https://{server}/api/v1/timelines/home"
-
-    try:
-
-        response = get_toots(url, access_token, http=http)
-
-        if response.status_code == 200:
-            toots = response.json()
-        else:
-            report_mastodon_error(
-                f"Error getting URL {url}",
-                response.status_code,
-                access_token,
-                "read:statuses"
-            )
-
-        # Paginate as needed
-        while len(toots) < max and 'next' in response.links:
-            response = get_toots(response.links['next']['url'], access_token, http=http)
-            toots = toots + response.json()
-    except Exception as ex:
-        logger.error(f"Error getting timeline toots: {ex}")
-        raise
-
-    logger.info(f"Found {len(toots)} toots in timeline")
-
-    return toots
-
-def get_toots(url, access_token, *, http):
-    response = http.get( url, headers={
-        "Authorization": f"Bearer {access_token}",
-    })
-
-    if response.status_code != 200:
-        report_mastodon_error(
-            f"Error getting URL {url}",
-            response.status_code,
-            access_token,
-            "read:statuses"
-        )
-
-    return response
-
-def get_active_user_ids(server, access_token, reply_interval_hours, *, http):
-    """get all user IDs on the server that have posted a toot in the given
-       time interval"""
-    since = datetime.now() - timedelta(days=reply_interval_hours / 24 + 1)
-    url = f"https://{server}/api/v1/admin/accounts"
-    resp = http.get(url, headers={
-        "Authorization": f"Bearer {access_token}",
-    })
-    if resp.status_code == 200:
-        for user in resp.json():
-            last_status_at = user["account"]["last_status_at"]
-            if last_status_at is not None:
-                last_active = datetime.strptime(last_status_at, "%Y-%m-%d")
-                if last_active > since:
-                    logger.info(f"Found active user: {user['username']}")
-                    yield user["id"]
-    else:
-        report_mastodon_error(
-            f"Error getting user IDs on server {server}",
-            resp.status_code,
-            access_token,
-            "admin:read:accounts"
-        )
-
-
-def get_all_reply_toots(server, user_ids, access_token, reply_interval_hours, *, http, state):
+def get_all_reply_toots(home, user_ids, reply_interval_hours, *, state):
     """get all replies to other users by the given users in the last day"""
     replies_since = datetime.now() - timedelta(hours=reply_interval_hours)
     reply_toots = list(
         itertools.chain.from_iterable(
-            get_reply_toots(
-                user_id, server, access_token, replies_since, http=http, state=state
-            )
+            get_reply_toots(user_id, home, replies_since, state=state)
             for user_id in user_ids
         )
     )
@@ -261,31 +113,19 @@ def get_all_reply_toots(server, user_ids, access_token, reply_interval_hours, *,
     return reply_toots
 
 
-def get_reply_toots(user_id, server, access_token, reply_since, *, http, state):
+def get_reply_toots(user_id, home, reply_since, *, state):
     """get replies by the user to other users since the given date"""
-    url = f"https://{server}/api/v1/accounts/{user_id}/statuses?exclude_replies=false&limit=40"
-
     try:
-        resp = http.get(url, headers={
-            "Authorization": f"Bearer {access_token}",
-        })
+        statuses = home.account_statuses(user_id)
     except Exception as ex:
         logger.error(
-            f"Error getting replies for user {user_id} on server {server}: {ex}"
+            f"Error getting replies for user {user_id} on server {home.server}: {ex}"
         )
         return []
 
-    if resp.status_code != 200:
-        report_mastodon_error(
-            f"Error getting replies for user {user_id} on server {server}",
-            resp.status_code,
-            access_token,
-            "read:statuses"
-        )
-
     toots = [
         toot
-        for toot in resp.json()
+        for toot in statuses
         if toot["in_reply_to_id"] is not None
         and toot["url"] not in state.seen_urls
         and datetime.strptime(toot["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -401,13 +241,13 @@ def get_toot_context(server, toot_id, toot_url, *, http, state):
 
     return client.fetch_context_urls(toot_id, toot_url)
 
-def add_context_urls(server, access_token, context_urls, *, http, state):
+def add_context_urls(home, context_urls, *, state):
     """add the given toot URLs to the server"""
     count = 0
     failed = 0
     for url in context_urls:
         if url not in state.seen_urls:
-            added = add_context_url(url, server, access_token, http=http)
+            added = home.resolve(url)
             if added is True:
                 state.seen_urls.add(url)
                 count += 1
@@ -417,115 +257,9 @@ def add_context_urls(server, access_token, context_urls, *, http, state):
     logger.info(f"Added {count} new context toots (with {failed} failures)")
 
 
-def add_context_url(url, server, access_token, *, http):
-    """add the given toot URL to the server"""
-    search_url = f"https://{server}/api/v2/search?q={url}&resolve=true&limit=1"
-
-    try:
-        resp = http.get(search_url, headers={
-            "Authorization": f"Bearer {access_token}",
-        })
-    except Exception as ex:
-        logger.error(
-            f"Error adding url {search_url} to server {server}. Exception: {ex}"
-        )
-        return False
-
-    if resp.status_code == 200:
-        logger.debug(f"Added context url {url}")
-        return True
-    elif resp.status_code == 403:
-        logger.error(
-            f"Error adding url {search_url} to server {server}. Status code: {resp.status_code}. "
-            "Make sure you have the read:search scope enabled for your access token."
-        )
-        return False
-    else:
-        logger.error(
-            f"Error adding url {search_url} to server {server}. Status code: {resp.status_code}"
-        )
-        return False
-
-def get_paginated_mastodon(url, max, headers = None, timeout = None, max_tries = 5, *, http):
-    """Make a paginated request to mastodon"""
-    headers = headers or {}
-    if(isinstance(max, int)):
-        furl = f"{url}?limit={max}"
-    else:
-        furl = url
-
-    response = http.get(furl, headers, timeout, max_tries)
-
-    if response.status_code != 200:
-        report_mastodon_error(
-            f"Error getting URL {url}",
-            response.status_code,
-            headers.get('Authorization', '').replace("Bearer ", ""),
-        )
-
-    result = response.json()
-
-    if(isinstance(max, int)):
-        while len(result) < max and 'next' in response.links:
-            response = http.get(response.links['next']['url'], headers, timeout, max_tries)
-            if response.status_code != 200:
-                raise Exception(
-                    f"Error getting URL {response.url}. \
-                        Status code: {response.status_code}"
-                )
-            response_json = response.json()
-            if isinstance(response_json, list):
-                result += response_json
-            else:
-                break
-    else:
-        while result and parser.parse(result[-1]['created_at']) >= max \
-            and 'next' in response.links:
-            response = http.get(response.links['next']['url'], headers, timeout, max_tries)
-            if response.status_code != 200:
-                raise Exception(
-                    f"Error getting URL {response.url}. \
-                        Status code: {response.status_code}"
-                )
-            response_json = response.json()
-            if isinstance(response_json, list):
-                result += response_json
-            else:
-                break
-    return result
-
-def get_user_lists(server, token, *, http):
-    return get_paginated_mastodon(f"https://{server}/api/v1/lists", 99, {
-        "Authorization": f"Bearer {token}",
-    },
-        http=http)
-
-def get_list_timeline(server, list, token, max, *, http):
-    """Get all post in the user's home timeline"""
-
-    url = f"https://{server}/api/v1/timelines/list/{list['id']}"
-
-    posts = get_paginated_mastodon(url, max, {
-        "Authorization": f"Bearer {token}",
-    },
-        http=http)
-
-    logger.info(f"Found {len(posts)} toots in list {list['title']}")
-
-    return posts
-
-def get_list_users(server, list, token, max, *, http):
-    url = f"https://{server}/api/v1/lists/{list['id']}/accounts"
-    accounts = get_paginated_mastodon(url, max, {
-        "Authorization": f"Bearer {token}",
-    },
-        http=http)
-    logger.info(f"Found {len(accounts)} accounts in list {list['title']}")
-    return accounts
-
-def fetch_timeline_context(timeline_posts, token, *, http, config, state):
+def fetch_timeline_context(timeline_posts, home, *, http, config, state):
     known_context_urls = get_all_known_context_urls(config.server, timeline_posts, http=http, state=state)
-    add_context_urls(config.server, token, known_context_urls, http=http, state=state)
+    add_context_urls(home, known_context_urls, state=state)
 
     # Backfill any post authors, and any mentioned users
     if config.backfill_mentioned_users:
@@ -546,23 +280,7 @@ def fetch_timeline_context(timeline_posts, token, *, http, config, state):
                 if user not in mentioned_users and user['acct'] not in state.all_known_users:
                     mentioned_users.append(user)
 
-        add_user_posts(config.server, token, filter_known_users(mentioned_users, state.all_known_users), state.recently_checked_users, http=http, config=config, state=state)
-
-def report_mastodon_error(error_message, error_code, access_token, required_scope = '') -> NoReturn:
-    subline = ""
-    match error_code:
-        case 401:
-            subline = "\nIt looks like your access token is incorrect. Consider generating a new access token, and/or ensure you have copy and pasted the whole token correctly."
-        case 403:
-            if(required_scope != ""):
-                subline = f"\nAdd the {required_scope} scope to your access token, and regenerate the token."
-            else:
-                subline = "\nMake sure you have enabled the required scope(s) for your token."
-
-    raise Exception(
-        f"{error_message} with token {access_token[:+5]}{'*' * (len(access_token) - 10)}{access_token[-5:]}. Status code: {error_code} "
-        f"{subline}"
-    )
+        add_user_posts(home, filter_known_users(mentioned_users, state.all_known_users), state.recently_checked_users, http=http, config=config, state=state)
 
 if __name__ == "__main__":
     start = datetime.now()
@@ -585,7 +303,6 @@ if __name__ == "__main__":
     logger.info(f"Starting FediFetcher v{VERSION}")
 
     http = HttpClient(config)
-    home_server = MastodonApi(config.server, http)
     store = StateStore(config)
 
     runId = uuid.uuid4()
@@ -609,29 +326,31 @@ if __name__ == "__main__":
             http.robots.discard_stale_files(ROBOTS_MAX_AGE)
 
             for token in config.access_tokens:
+                home = HomeServer(config.server, token, http)
 
                 if config.from_lists:
                     """Pull replies from lists"""
-                    lists = get_user_lists(config.server, token, http=http)
+                    lists = home.lists()
                     logger.info(f"Getting context for {len(lists)} lists")
                     for user_list in lists:
                         # Fill context from list
                         if config.max_list_length > 0:
-                            timeline_toots = get_list_timeline(config.server, user_list, token, config.max_list_length, http=http)
-                            fetch_timeline_context(timeline_toots, token, http=http, config=config, state=state)
+                            timeline_toots = home.list_timeline(user_list['id'], config.max_list_length)
+                            logger.info(f"Found {len(timeline_toots)} toots in list {user_list['title']}")
+                            fetch_timeline_context(timeline_toots, home, http=http, config=config, state=state)
 
                         # Backfill profiles from list
                         if config.max_list_accounts:
-                            accounts = get_list_users(config.server, user_list, token, config.max_list_accounts, http=http)
-                            add_user_posts(config.server, token, accounts, state.recently_checked_users, http=http, config=config, state=state)
+                            accounts = home.list_accounts(user_list['id'], config.max_list_accounts)
+                            logger.info(f"Found {len(accounts)} accounts in list {user_list['title']}")
+                            add_user_posts(home, accounts, state.recently_checked_users, http=http, config=config, state=state)
 
                 if config.reply_interval_in_hours > 0:
                     """pull the context toots of toots user replied to, from their
                     original server, and add them to the local server."""
-                    user_ids = get_active_user_ids(config.server, token, config.reply_interval_in_hours, http=http)
+                    user_ids = home.active_user_ids(config.reply_interval_in_hours)
                     reply_toots = get_all_reply_toots(
-                        config.server, user_ids, token, config.reply_interval_in_hours,
-                        http=http, state=state,
+                        home, user_ids, config.reply_interval_in_hours, state=state
                     )
                     known_context_urls = get_all_known_context_urls(config.server, reply_toots, http=http, state=state)
                     state.seen_urls.update(known_context_urls)
@@ -639,47 +358,54 @@ if __name__ == "__main__":
                         config.server, reply_toots, http=http, state=state
                     )
                     context_urls = get_all_context_urls(config.server, replied_toot_ids, http=http, state=state)
-                    add_context_urls(config.server, token, context_urls, http=http, state=state)
+                    add_context_urls(home, context_urls, state=state)
 
                 if config.home_timeline_length > 0:
                     """Do the same with any toots on the key owner's home timeline """
                     logger.info("Getting context for home timeline")
-                    timeline_toots = get_timeline(config.server, token, config.home_timeline_length, http=http)
-                    fetch_timeline_context(timeline_toots, token, http=http, config=config, state=state)
+                    timeline_toots = home.timeline(config.home_timeline_length)
+                    fetch_timeline_context(timeline_toots, home, http=http, config=config, state=state)
 
                 if config.max_followings > 0:
                     logger.info(f"Getting posts from last {config.max_followings} followings")
-                    user_id = home_server.user_id(config.user, token)
-                    followings = get_new_followings(config.server, user_id, token, config.max_followings, state.all_known_users, http=http)
-                    add_user_posts(config.server, token, followings, state.known_followings, http=http, config=config, state=state)
+                    followings = home.following(home.user_id(config.user), config.max_followings)
+                    new_followings = filter_known_users(followings, state.all_known_users)
+                    logger.info(f"Got {len(followings)} followings, {len(new_followings)} of which are new")
+                    add_user_posts(home, new_followings, state.known_followings, http=http, config=config, state=state)
 
                 if config.max_followers > 0:
                     logger.info(f"Getting posts from last {config.max_followers} followers")
-                    user_id = home_server.user_id(config.user, token)
-                    followers = get_new_followers(config.server, user_id, token, config.max_followers, state.all_known_users, http=http)
-                    add_user_posts(config.server, token, followers, state.recently_checked_users, http=http, config=config, state=state)
+                    followers = home.followers(home.user_id(config.user), config.max_followers)
+                    new_followers = filter_known_users(followers, state.all_known_users)
+                    logger.info(f"Got {len(followers)} followers, {len(new_followers)} of which are new")
+                    add_user_posts(home, new_followers, state.recently_checked_users, http=http, config=config, state=state)
 
                 if config.max_follow_requests > 0:
                     logger.info(f"Getting posts from last {config.max_follow_requests} follow requests")
-                    follow_requests = get_new_follow_requests(config.server, token, config.max_follow_requests, state.all_known_users, http=http)
-                    add_user_posts(config.server, token, follow_requests, state.recently_checked_users, http=http, config=config, state=state)
+                    follow_requests = home.follow_requests(config.max_follow_requests)
+                    new_requests = filter_known_users(follow_requests, state.all_known_users)
+                    logger.info(f"Got {len(follow_requests)} follow_requests, {len(new_requests)} of which are new")
+                    add_user_posts(home, new_requests, state.recently_checked_users, http=http, config=config, state=state)
 
                 if config.from_notifications > 0:
                     logger.info(f"Getting notifications for last {config.from_notifications} hours")
-                    notification_users = get_notification_users(config.server, token, state.all_known_users, config.from_notifications, http=http)
-                    add_user_posts(config.server, token, notification_users, state.recently_checked_users, http=http, config=config, state=state)
+                    since = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(hours=config.from_notifications)
+                    accounts = home.notification_accounts(since)
+                    new_accounts = filter_known_users(accounts, state.all_known_users)
+                    logger.info(f"Found {len(accounts)} users in notifications, {len(new_accounts)} of which are new")
+                    add_user_posts(home, new_accounts, state.recently_checked_users, http=http, config=config, state=state)
 
                 if config.max_bookmarks > 0:
                     logger.info(f"Pulling replies to the last {config.max_bookmarks} bookmarks")
-                    bookmarks = get_bookmarks(config.server, token, config.max_bookmarks, http=http)
+                    bookmarks = home.bookmarks(config.max_bookmarks)
                     known_context_urls = get_all_known_context_urls(config.server, bookmarks, http=http, state=state)
-                    add_context_urls(config.server, token, known_context_urls, http=http, state=state)
+                    add_context_urls(home, known_context_urls, state=state)
 
                 if config.max_favourites > 0:
                     logger.info(f"Pulling replies to the last {config.max_favourites} favourites")
-                    favourites = get_favourites(config.server, token, config.max_favourites, http=http)
+                    favourites = home.favourites(config.max_favourites)
                     known_context_urls = get_all_known_context_urls(config.server, favourites, http=http, state=state)
-                    add_context_urls(config.server, token, known_context_urls, http=http, state=state)
+                    add_context_urls(home, known_context_urls, state=state)
 
     except LockedError as ex:
         logger.critical(str(ex))
