@@ -1,11 +1,8 @@
-import json
-import re
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from requests.models import Response
 
 import find_posts
 from find_posts import (
@@ -14,18 +11,11 @@ from find_posts import (
     filter_known_users,
     get_bookmarks,
     get_favourites,
-    get_lemmy_comment_context,
-    get_lemmy_urls,
     get_list_timeline,
     get_list_users,
-    get_misskey_urls,
     get_new_follow_requests,
     get_new_followings,
-    get_peertube_urls,
     get_toot_context,
-    get_user_id,
-    get_user_posts_mastodon,
-    get_user_posts_misskey,
     user_has_opted_out,
 )
 
@@ -225,133 +215,18 @@ def userName():
     return "test_user"
 
 
-def test_get_user_posts_mastodon_success(userName, webserver):
-    http = Mock()
-    with patch("find_posts.get_user_id") as mock_get_user_id:
-
-        # Mocking get_user_id
-        mock_get_user_id.return_value = 1234
-
-        # Mocking get function call
-        mock_response = Response()
-        mock_response.status_code = 200
-        mock_response._content = b'{"data": "Test"}'
-        http.get.return_value = mock_response
-
-        result = get_user_posts_mastodon(userName, webserver, http=http)
-        assert result == {"data": "Test"}
 
 
-def test_get_user_posts_mastodon_user_not_found(userName, webserver):
-    http = Mock()
-    with patch("find_posts.get_user_id") as mock_get_user_id:
-
-        # Mocking get_user_id
-        mock_get_user_id.return_value = 1234
-
-        # Mocking get function call
-        mock_response = Response()
-        mock_response.status_code = 404
-        http.get.return_value = mock_response
-
-        result = get_user_posts_mastodon(userName, webserver, http=http)
-        assert result is None
 
 
-def test_get_user_posts_mastodon_error_status_code(userName, webserver):
-    http = Mock()
-    with patch("find_posts.get_user_id") as mock_get_user_id:
-
-        # Mocking get_user_id
-        mock_get_user_id.return_value = 1234
-
-        # Mocking get function call
-        mock_response = Response()
-        mock_response.status_code = 500
-        http.get.return_value = mock_response
-
-        result = get_user_posts_mastodon(userName, webserver, http=http)
-        assert result is None
 
 
-@patch("find_posts.logger")
-def test_get_user_posts_lemmy_community(mock_logger):
-    http = Mock()
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"posts": [{"post": {"ap_id": "test_url"}}]}
-    http.get.return_value = mock_response
-
-    result = find_posts.get_user_posts_lemmy(
-        "test_user", "https://test.com/c/test_user", "test.com",
-        http=http)
-
-    assert result == [{"ap_id": "test_url", "url": "test_url"}]
-    http.get.assert_called_once_with(
-        "https://test.com/api/v3/post/list?community_name=test_user&sort=New&limit=50"
-    )
-    mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.logger")
-def test_get_user_posts_lemmy_user(mock_logger):
-    http = Mock()
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "posts": [{"post": {"ap_id": "post_url"}}],
-        "comments": [{"post": {"ap_id": "comment_url"}}],
-    }
-    http.get.return_value = mock_response
-
-    result = find_posts.get_user_posts_lemmy(
-        "test_user", "https://test.com/u/test_user", "test.com",
-        http=http)
-
-    assert result == [
-        {"ap_id": "comment_url", "url": "comment_url"},
-        {"ap_id": "post_url", "url": "post_url"},
-    ]
-    http.get.assert_called_once_with(
-        "https://test.com/api/v3/user?username=test_user&sort=New&limit=50"
-    )
-    mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.logger")
-def test_get_user_posts_peertube(mock_logger):
-    http = Mock()
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"data": "test_data"}
-    http.get.return_value = mock_response
-
-    result = find_posts.get_user_posts_peertube("test_user", "test_webserver", http=http)
-
-    assert result == "test_data"
-    http.get.assert_called_once_with(
-        "https://test_webserver/api/v1/accounts/test_user/videos"
-    )
-    mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.logger")
-def test_get_user_posts_misskey(mock_logger):
-    http = Mock()
-    mock_response = http.post.return_value
-    mock_response.status_code = 200
-    mock_response.json.return_value = [
-        {"host": None, "id": "id1"},
-        {"host": "host1", "id": "id2"},
-    ]
-
-    result = get_user_posts_misskey("username", "webserver", http=http)
-
-    http.post.assert_called_with(
-        "https://webserver/api/users/notes", {"userId": "id1", "limit": 40}
-    )
-    mock_logger.error.assert_not_called()
-    assert result is not None
 
 
 @patch("find_posts.get_paginated_mastodon")
@@ -482,67 +357,14 @@ def test_get_new_followings(
     mock_logger.info.assert_called_with("Got 3 followings, 2 of which are new")
 
 
-def test_get_user_id_with_username():
-    http = Mock()
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "123"}
-    http.get.return_value = mock_response
-    result = get_user_id("server", user="test_user", http=http)
-    http.get.assert_called_with(
-        "https://server/api/v1/accounts/lookup?acct=test_user", headers={}
-    )
-    assert result == "123"
 
 
-def test_get_user_id_with_access_token():
-    http = Mock()
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"id": "456"}
-    http.get.return_value = mock_response
-    result = get_user_id("server", access_token="test_token", http=http)
-    http.get.assert_called_with(
-        "https://server/api/v1/accounts/verify_credentials",
-        headers={
-            "Authorization": "Bearer test_token",
-        },
-    )
-    assert result == "456"
 
 
-def test_get_user_id_with_no_user_or_token():
-    http = Mock()
-    with pytest.raises(
-        Exception,
-        match="You must supply either a user name or an access token, to get an user ID",
-    ):
-        get_user_id("server", http=http)
 
 
-def test_get_user_id_with_404_status_code():
-    http = Mock()
-    mock_response = MagicMock()
-    mock_response.status_code = 404
-    http.get.return_value = mock_response
-    with pytest.raises(
-        Exception, match="User test_user was not found on server server."
-    ):
-        get_user_id("server", user="test_user", http=http)
 
 
-def test_get_user_id_with_non_200_or_404_status_code():
-    http = Mock()
-    mock_response = MagicMock()
-    mock_response.status_code = 500
-    http.get.return_value = mock_response
-    with pytest.raises(
-        Exception,
-        match=re.escape(
-            "Error getting URL https://server/api/v1/accounts/lookup?acct=test_user. Status code: 500"
-        ),
-    ):
-        get_user_id("server", user="test_user", http=http)
 
 
 @patch("find_posts.get_toots")
@@ -770,214 +592,30 @@ def mock_response_fail():
     return return_value
 
 
-@patch("find_posts.logger")
-def test_get_mastodon_urls_request_fail(mock_logger, mock_response_fail):
-    http = Mock()
-    http.get.return_value = mock_response_fail
-
-    result = find_posts.get_mastodon_urls(
-        "abc.com", "123456", "https://abc.com/statuses/123456",
-        http=http)
-
-    assert list(result) == []
-    mock_logger.error.assert_called_once()
 
 
-@patch("find_posts.logger")
-def test_get_mastodon_urls_exception(mock_logger):
-    http = Mock()
-    http.get.side_effect = Exception("Test exception")
-
-    result = find_posts.get_mastodon_urls(
-        "abc.com", "123456", "https://abc.com/statuses/123456",
-        http=http)
-
-    assert list(result) == []
-    mock_logger.error.assert_called_once()
 
 
-@patch("find_posts.get_lemmy_comment_context")
-@patch("find_posts.get_lemmy_comments_urls")
-@patch("find_posts.logger")
-def test_get_lemmy_urls_comment(
-    mock_logger, mock_get_lemmy_comments_urls, mock_get_lemmy_comment_context
-):
-    http = Mock()
-    webserver = "webserver"
-    toot_id = "toot_id"
-    toot_url = "/comment/"
-
-    get_lemmy_urls(webserver, toot_id, toot_url, http=http)
-
-    mock_get_lemmy_comment_context.assert_called_once_with(webserver, toot_id, toot_url, http=http)
-    mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.get_lemmy_comment_context")
-@patch("find_posts.get_lemmy_comments_urls")
-@patch("find_posts.logger")
-def test_get_lemmy_urls_post(
-    mock_logger, mock_get_lemmy_comments_urls, mock_get_lemmy_comment_context
-):
-    http = Mock()
-    webserver = "webserver"
-    toot_id = "toot_id"
-    toot_url = "/post/"
-
-    get_lemmy_urls(webserver, toot_id, toot_url, http=http)
-
-    mock_get_lemmy_comments_urls.assert_called_once_with(webserver, toot_id, toot_url, http=http)
-    mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.get_lemmy_comment_context")
-@patch("find_posts.get_lemmy_comments_urls")
-@patch("find_posts.logger")
-def test_get_lemmy_urls_else(
-    mock_logger, mock_get_lemmy_comments_urls, mock_get_lemmy_comment_context
-):
-    http = Mock()
-    webserver = "webserver"
-    toot_id = "toot_id"
-    toot_url = "/else/"
-
-    result = get_lemmy_urls(webserver, toot_id, toot_url, http=http)
-
-    assert result == []
-    mock_get_lemmy_comments_urls.assert_not_called()
-    mock_get_lemmy_comment_context.assert_not_called()
-    mock_logger.error.assert_called_once_with(f"unknown lemmy url type {toot_url}")
 
 
-@patch("find_posts.logger")
-def test_get_lemmy_comment_context_get_fail(mock_logger):
-    http = Mock()
-    http.get.side_effect = Exception
-
-    assert (
-        get_lemmy_comment_context("webserver.com", "test_toot_id", "test_toot_url", http=http)
-        == []
-    )
-
-    http.get.assert_called_once_with(
-        "https://webserver.com/api/v3/comment?id=test_toot_id"
-    )
-    mock_logger.error.assert_called_once()
 
 
-@patch("find_posts.logger")
-def test_get_lemmy_comment_context_parse_fail(mock_logger):
-    http = Mock()
-    http.get.return_value.status_code = 200
-    http.get.return_value.json.return_value = {"invalid_key": "invalid_value"}
-
-    assert (
-        get_lemmy_comment_context("webserver.com", "test_toot_id", "test_toot_url", http=http)
-        == []
-    )
-
-    http.get.assert_called_once_with(
-        "https://webserver.com/api/v3/comment?id=test_toot_id"
-    )
-    mock_logger.error.assert_called_once()
 
 
-def test_get_peertube_urls_success():
-    http = Mock()
-    if True:
-        mock_resp = Response()
-        mock_resp.status_code = 200
-        mock_resp._content = json.dumps(
-            {"data": [{"url": "http://example.com/1"}, {"url": "http://example.com/2"}]}
-        ).encode("utf-8")
-
-        http.get.return_value = mock_resp
-
-        urls = get_peertube_urls("example.com", "123", "http://toot_url.com", http=http)
-        http.get.assert_called_once_with(
-            "https://example.com/api/v1/videos/123/comment-threads"
-        )
-        assert urls == ["http://example.com/1", "http://example.com/2"]
 
 
-@patch("find_posts.logger")
-def test_get_peertube_urls_exception(mock_logger):
-    http = Mock()
-    if True:
-        http.get.side_effect = Exception("Test exception")
-
-        urls = get_peertube_urls("example.com", "123", "http://toot_url.com", http=http)
-        http.get.assert_called_once_with(
-            "https://example.com/api/v1/videos/123/comment-threads"
-        )
-        mock_logger.error.assert_called_once_with(
-            "Error getting comments on video 123 from http://toot_url.com. Exception: Test exception"
-        )
-        assert urls == []
 
 
-def test_get_misskey_urls_success():
-    http = Mock()
-    with patch(
-        "find_posts.logger"
-    ) as mock_logger:
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = [{"id": "123"}, {"id": "456"}]
-        http.post.return_value = mock_response
-        result = get_misskey_urls("testserver", "1", "testurl", http=http)
-        expected = [
-            "https://testserver/notes/123",
-            "https://testserver/notes/456",
-            "https://testserver/notes/123",
-            "https://testserver/notes/456",
-        ]
-        assert result == expected
-        assert http.post.call_count == 2
-        assert mock_logger.debug.call_count == 2
 
 
-def test_get_misskey_urls_post_error():
-    http = Mock()
-    with patch(
-        "find_posts.logger"
-    ) as mock_logger:
-        http.post.side_effect = Exception("Error")
-        result = get_misskey_urls("testserver", "1", "testurl", http=http)
-        expected = []
-        assert result == expected
-        assert http.post.call_count == 1
-        assert mock_logger.error.call_count == 1
 
 
-def test_get_misskey_urls_non_200_response():
-    http = Mock()
-    with patch(
-        "find_posts.logger"
-    ) as mock_logger:
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        http.post.return_value = mock_response
-        result = get_misskey_urls("testserver", "1", "testurl", http=http)
-        expected = []
-        assert result == expected
-        assert mock_logger.error.called
 
 
-def test_get_misskey_urls_json_error():
-    http = Mock()
-    with patch(
-        "find_posts.logger"
-    ) as mock_logger:
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.side_effect = Exception("JSON Error")
-        http.post.return_value = mock_response
-        result = get_misskey_urls("testserver", "1", "testurl", http=http)
-        expected = []
-        assert result == expected
-        assert http.post.call_count == 2
-        assert mock_logger.error.call_count == 2
 
 
 @patch("find_posts.add_context_url", return_value=False)

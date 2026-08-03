@@ -1,0 +1,57 @@
+import pytest
+
+from fedifetcher.api.peertube import PeerTubeApi
+from fedifetcher.servers import ApiFlavour
+
+
+@pytest.fixture
+def api(http):
+    return PeerTubeApi("video.example", http)
+
+
+def test_it_claims_the_peertube_flavour():
+    assert PeerTubeApi.flavour is ApiFlavour.PEERTUBE
+
+
+def test_user_posts_are_the_accounts_videos(api, http, reply):
+    http.get.return_value = reply(200, {"data": [{"url": "https://video.example/videos/watch/1"}]})
+
+    videos = api.fetch_user_posts("channel", "https://video.example/accounts/channel")
+
+    assert videos == [{"url": "https://video.example/videos/watch/1"}]
+    assert http.get.call_args[0][0] == (
+        "https://video.example/api/v1/accounts/channel/videos"
+    )
+
+
+def test_user_posts_give_up_on_an_error_status(api, http, reply):
+    http.get.return_value = reply(500)
+    assert api.fetch_user_posts("channel", "https://video.example/accounts/channel") is None
+
+
+def test_user_posts_give_up_when_the_request_fails(api, http):
+    http.get.side_effect = Exception("no route to host")
+    assert api.fetch_user_posts("channel", "https://video.example/accounts/channel") is None
+
+
+def test_context_is_the_comment_threads(api, http, reply):
+    http.get.return_value = reply(200, {"data": [
+        {"url": "https://video.example/videos/watch/1/comment/2"},
+    ]})
+
+    urls = api.fetch_context_urls("1", "https://video.example/videos/watch/1")
+
+    assert urls == ["https://video.example/videos/watch/1/comment/2"]
+    assert http.get.call_args[0][0] == (
+        "https://video.example/api/v1/videos/1/comment-threads"
+    )
+
+
+def test_context_is_empty_on_an_error_status(api, http, reply):
+    http.get.return_value = reply(500)
+    assert api.fetch_context_urls("1", "https://video.example/videos/watch/1") == []
+
+
+def test_context_is_empty_when_the_request_fails(api, http):
+    http.get.side_effect = Exception("no route to host")
+    assert api.fetch_context_urls("1", "https://video.example/videos/watch/1") == []

@@ -26,4 +26,4 @@ source = ["find_posts", "fedifetcher"]
 
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:"]
-fail_under = 66
+fail_under = 72

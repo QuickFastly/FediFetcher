@@ -4,7 +4,6 @@ import itertools
 import json
 import logging
 import os
-import re
 import sys
 import uuid
 from datetime import datetime, timedelta
@@ -13,9 +12,11 @@ from typing import NoReturn
 from dateutil import parser
 
 from fedifetcher import VERSION
+from fedifetcher.api import client_for
+from fedifetcher.api.mastodon import MastodonApi
 from fedifetcher.config import Config, ConfigError
 from fedifetcher.http import HttpClient, build_callback_url
-from fedifetcher.servers import ApiFlavour, get_server_info
+from fedifetcher.servers import get_server_info
 from fedifetcher.state import ServerCache, TimestampedSet
 from fedifetcher.urls import (
     parse_url,
@@ -121,141 +122,11 @@ def get_user_posts(user, known_followings, server, seen_hosts, *, http):
         logger.error(f'server {parsed_url[0]} not found for post')
         return None
 
-    if post_server.supports(ApiFlavour.MASTODON):
-        return get_user_posts_mastodon(parsed_url[1], post_server.webserver, http=http)
-
-    if post_server.supports(ApiFlavour.LEMMY):
-        return get_user_posts_lemmy(parsed_url[1], user['url'], post_server.webserver, http=http)
-
-    if post_server.supports(ApiFlavour.MISSKEY):
-        return get_user_posts_misskey(parsed_url[1], post_server.webserver, http=http)
-
-    if post_server.supports(ApiFlavour.PEERTUBE):
-        return get_user_posts_peertube(parsed_url[1], post_server.webserver, http=http)
-
-    logger.error(f'server api unknown for {post_server.webserver}, cannot fetch user posts')
-    return None
-
-def get_user_posts_mastodon(userName, webserver, *, http):
-    try:
-        user_id = get_user_id(webserver, userName, http=http)
-    except Exception as ex:
-        logger.error(f"Error getting user ID for user {userName}: {ex}")
+    client = client_for(post_server, http)
+    if client is None:
         return None
 
-    try:
-        url = f"https://{webserver}/api/v1/accounts/{user_id}/statuses?limit=40"
-        response = http.get(url)
-
-        if(response.status_code == 200):
-            return response.json()
-        elif response.status_code == 404:
-            raise Exception(
-                f"User {userName} was not found on server {webserver}"
-            )
-        else:
-            raise Exception(
-                f"Error getting URL {url}. Status code: {response.status_code}"
-            )
-    except Exception as ex:
-        logger.error(f"Error getting posts for user {userName}: {ex}")
-        return None
-
-def get_user_posts_lemmy(userName, userUrl, webserver, *, http):
-    # community
-    if re.match(r"^https:\/\/[^\/]+\/c\/", userUrl):
-        try:
-            url = f"https://{webserver}/api/v3/post/list?community_name={userName}&sort=New&limit=50"
-            response = http.get(url)
-
-            if(response.status_code == 200):
-                posts = [post['post'] for post in response.json()['posts']]
-                for post in posts:
-                    post['url'] = post['ap_id']
-                return posts
-
-        except Exception as ex:
-            logger.error(f"Error getting community posts for community {userName}: {ex}")
-        return None
-
-    # user
-    if re.match(r"^https:\/\/[^\/]+\/u\/", userUrl):
-        try:
-            url = f"https://{webserver}/api/v3/user?username={userName}&sort=New&limit=50"
-            response = http.get(url)
-
-            if(response.status_code == 200):
-                comments = [post['post'] for post in response.json()['comments']]
-                posts = [post['post'] for post in response.json()['posts']]
-                all_posts = comments + posts
-                for post in all_posts:
-                    post['url'] = post['ap_id']
-                return all_posts
-
-        except Exception as ex:
-            logger.error(f"Error getting user posts for user {userName}: {ex}")
-        return None
-
-    logger.error(f"Unknown Lemmy profile URL type {userUrl}")
-    return None
-
-def get_user_posts_peertube(userName, webserver, *, http):
-    try:
-        url = f'https://{webserver}/api/v1/accounts/{userName}/videos'
-        response = http.get(url)
-        if response.status_code == 200:
-            return response.json()['data']
-        else:
-            logger.error(f"Error getting posts by user {userName} from {webserver}. Status Code: {response.status_code}")
-            return None
-    except Exception as ex:
-        logger.error(f"Error getting posts by user {userName} from {webserver}. Exception: {ex}")
-        return None
-
-def get_user_posts_misskey(userName, webserver, *, http):
-    # query user info via search api
-    # we could filter by host but there's no way to limit that to just the main host on firefish currently
-    # on misskey it works if you supply '.' as the host but firefish does not
-    userId = None
-    try:
-        url = f'https://{webserver}/api/users/search-by-username-and-host'
-        resp = http.post(url, { 'username': userName })
-
-        if resp.status_code == 200:
-            res = resp.json()
-            for user in res:
-                if user['host'] is None:
-                    userId = user['id']
-                    break
-        else:
-            logger.error(f"Error finding user {userName} from {webserver}. Status Code: {resp.status_code}")
-            return None
-    except Exception as ex:
-        logger.error(f"Error finding user {userName} from {webserver}. Exception: {ex}")
-        return None
-
-    if userId is None:
-        logger.error(f'Error finding user {userName} from {webserver}: user not found on server in search')
-        return None
-
-    try:
-        url = f'https://{webserver}/api/users/notes'
-        resp = http.post(url, { 'userId': userId, 'limit': 40 })
-
-        if resp.status_code == 200:
-            notes = resp.json()
-            for note in notes:
-                if note.get('url') is None:
-                    # add this to make it look like Mastodon status objects
-                    note.update({ 'url': f"https://{webserver}/notes/{note['id']}" })
-            return notes
-        else:
-            logger.error(f"Error getting posts by user {userName} from {webserver}. Status Code: {resp.status_code}")
-            return None
-    except Exception as ex:
-        logger.error(f"Error getting posts by user {userName} from {webserver}. Exception: {ex}")
-        return None
-
+    return client.fetch_user_posts(parsed_url[1], user['url'])
 
 def get_new_follow_requests(server, access_token, max, known_followings, *, http):
     """Get any new follow requests for the specified user, up to the max number provided"""
@@ -306,34 +177,6 @@ def get_new_followings(server, user_id, access_token, max, known_followings, *, 
 
     return new_followings
 
-
-def get_user_id(server, user = None, access_token = None, *, http):
-    """Get the user id from the server, using a username"""
-
-    headers = {}
-
-    if user is not None and user != '':
-        url = f"https://{server}/api/v1/accounts/lookup?acct={user}"
-    elif access_token is not None:
-        url = f"https://{server}/api/v1/accounts/verify_credentials"
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-        }
-    else:
-        raise Exception('You must supply either a user name or an access token, to get an user ID')
-
-    response = http.get(url, headers=headers)
-
-    if response.status_code == 200:
-        return response.json()['id']
-    elif response.status_code == 404:
-        raise Exception(
-            f"User {user} was not found on server {server}."
-        )
-    else:
-        raise Exception(
-            f"Error getting URL {url}. Status code: {response.status_code}"
-        )
 
 def get_timeline(server, access_token, max, *, http):
     """Get all post in the user's home timeline"""
@@ -584,165 +427,11 @@ def get_toot_context(server, toot_id, toot_url, seen_hosts, *, http):
         logger.error(f'server {server} not found for post')
         return []
 
-    if post_server.supports(ApiFlavour.MASTODON):
-        return get_mastodon_urls(post_server.webserver, toot_id, toot_url, http=http)
-    if post_server.supports(ApiFlavour.LEMMY):
-        return get_lemmy_urls(post_server.webserver, toot_id, toot_url, http=http)
-    if post_server.supports(ApiFlavour.MISSKEY):
-        return get_misskey_urls(post_server.webserver, toot_id, toot_url, http=http)
-    if post_server.supports(ApiFlavour.PEERTUBE):
-        return get_peertube_urls(post_server.webserver, toot_id, toot_url, http=http)
-
-    logger.error(f'unknown server api for {server}')
-    return []
-
-def get_mastodon_urls(webserver, toot_id, toot_url, *, http):
-    url = f"https://{webserver}/api/v1/statuses/{toot_id}/context"
-    try:
-        resp = http.get(url)
-    except Exception as ex:
-        logger.error(f"Error getting context for toot {toot_url}. Exception: {ex}")
+    client = client_for(post_server, http)
+    if client is None:
         return []
 
-    if resp.status_code == 200:
-        try:
-            res = resp.json()
-            logger.debug(f"Got context for toot {toot_url}")
-            return (toot["url"] for toot in (res["ancestors"] + res["descendants"]))
-        except Exception as ex:
-            logger.error(f"Error parsing context for toot {toot_url}. Exception: {ex}")
-        return []
-
-    logger.error(
-        f"Error getting context for toot {toot_url}. Status code: {resp.status_code}"
-    )
-    return []
-
-def get_lemmy_urls(webserver, toot_id, toot_url, *, http):
-    if toot_url.find("/comment/") != -1:
-        return get_lemmy_comment_context(webserver, toot_id, toot_url, http=http)
-    if toot_url.find("/post/") != -1:
-        return get_lemmy_comments_urls(webserver, toot_id, toot_url, http=http)
-    else:
-        logger.error(f'unknown lemmy url type {toot_url}')
-        return []
-
-def get_lemmy_comment_context(webserver, toot_id, toot_url, *, http):
-    """get the URLs of the context toots of the given toot"""
-    comment = f"https://{webserver}/api/v3/comment?id={toot_id}"
-    try:
-        resp = http.get(comment)
-    except Exception as ex:
-        logger.error(f"Error getting comment {toot_id} from {toot_url}. Exception: {ex}")
-        return []
-
-    if resp.status_code == 200:
-        try:
-            res = resp.json()
-            post_id = res['comment_view']['comment']['post_id']
-            return get_lemmy_comments_urls(webserver, post_id, toot_url, http=http)
-        except Exception as ex:
-            logger.error(f"Error parsing context for comment {toot_url}. Exception: {ex}")
-        return []
-
-    logger.error(f"Error getting comment {toot_id} from {toot_url}. Status code: {resp.status_code}")
-    return []
-
-def get_lemmy_comments_urls(webserver, post_id, toot_url, *, http):
-    """get the URLs of the comments of the given post"""
-    urls = []
-    url = f"https://{webserver}/api/v3/post?id={post_id}"
-    try:
-        resp = http.get(url)
-    except Exception as ex:
-        logger.error(f"Error getting post {post_id} from {toot_url}. Exception: {ex}")
-        return []
-
-    if resp.status_code == 200:
-        try:
-            res = resp.json()
-            if res['post_view']['counts']['comments'] == 0:
-                return []
-            urls.append(res['post_view']['post']['ap_id'])
-        except Exception as ex:
-            logger.error(f"Error parsing post {post_id} from {toot_url}. Exception: {ex}")
-
-    url = f"https://{webserver}/api/v3/comment/list?post_id={post_id}&sort=New&limit=50"
-    try:
-        resp = http.get(url)
-    except Exception as ex:
-        logger.error(f"Error getting comments for post {post_id} from {toot_url}. Exception: {ex}")
-        return []
-
-    if resp.status_code == 200:
-        try:
-            res = resp.json()
-            list_of_urls = [comment_info['comment']['ap_id'] for comment_info in res['comments']]
-            logger.debug(f"Got {len(list_of_urls)} comments for post {toot_url}")
-            urls.extend(list_of_urls)
-            return urls
-        except Exception as ex:
-            logger.error(f"Error parsing comments for post {toot_url}. Exception: {ex}")
-
-    logger.error(f"Error getting comments for post {toot_url}. Status code: {resp.status_code}")
-    return []
-
-def get_peertube_urls(webserver, post_id, toot_url, *, http):
-    """get the URLs of the comments of a given peertube video"""
-    comments = f"https://{webserver}/api/v1/videos/{post_id}/comment-threads"
-    try:
-        resp = http.get(comments)
-    except Exception as ex:
-        logger.error(f"Error getting comments on video {post_id} from {toot_url}. Exception: {ex}")
-        return []
-
-    if resp.status_code == 200:
-        return [comment['url'] for comment in resp.json()['data']]
-
-    logger.error(f"Error getting comments on video {post_id} from {toot_url}. Status code: {resp.status_code}")
-    return []
-
-def get_misskey_urls(webserver, post_id, toot_url, *, http):
-    """get the URLs of the comments of a given misskey post"""
-
-    urls = []
-    url = f"https://{webserver}/api/notes/children"
-    try:
-        resp = http.post(url, { 'noteId': post_id, 'limit': 100, 'depth': 12 })
-    except Exception as ex:
-        logger.error(f"Error getting post {post_id} from {toot_url}. Exception: {ex}")
-        return []
-
-    if resp.status_code == 200:
-        try:
-            res = resp.json()
-            logger.debug(f"Got children for misskey post {toot_url}")
-            list_of_urls = [f'https://{webserver}/notes/{comment_info["id"]}' for comment_info in res]
-            urls.extend(list_of_urls)
-        except Exception as ex:
-            logger.error(f"Error parsing post {post_id} from {toot_url}. Exception: {ex}")
-    else:
-        logger.error(f"Error getting post {post_id} from {toot_url}. Status Code: {resp.status_code}")
-
-    url = f"https://{webserver}/api/notes/conversation"
-    try:
-        resp = http.post(url, { 'noteId': post_id, 'limit': 100 })
-    except Exception as ex:
-        logger.error(f"Error getting post {post_id} from {toot_url}. Exception: {ex}")
-        return []
-
-    if resp.status_code == 200:
-        try:
-            res = resp.json()
-            logger.debug(f"Got conversation for misskey post {toot_url}")
-            list_of_urls = [f'https://{webserver}/notes/{comment_info["id"]}' for comment_info in res]
-            urls.extend(list_of_urls)
-        except Exception as ex:
-            logger.error(f"Error parsing post {post_id} from {toot_url}. Exception: {ex}")
-    else:
-        logger.error(f"Error getting post {post_id} from {toot_url}. Status Code: {resp.status_code}")
-
-    return urls
+    return client.fetch_context_urls(toot_id, toot_url)
 
 def add_context_urls(server, access_token, context_urls, seen_urls, *, http):
     """add the given toot URLs to the server"""
@@ -928,6 +617,7 @@ if __name__ == "__main__":
     logger.info(f"Starting FediFetcher v{VERSION}")
 
     http = HttpClient(config)
+    home_server = MastodonApi(config.server, http)
 
     runId = uuid.uuid4()
 
@@ -1085,13 +775,13 @@ if __name__ == "__main__":
 
             if config.max_followings > 0:
                 logger.info(f"Getting posts from last {config.max_followings} followings")
-                user_id = get_user_id(config.server, config.user, token, http=http)
+                user_id = home_server.user_id(config.user, token)
                 followings = get_new_followings(config.server, user_id, token, config.max_followings, all_known_users, http=http)
                 add_user_posts(config.server, token, followings, known_followings, all_known_users, seen_urls, seen_hosts, http=http, config=config)
 
             if config.max_followers > 0:
                 logger.info(f"Getting posts from last {config.max_followers} followers")
-                user_id = get_user_id(config.server, config.user, token, http=http)
+                user_id = home_server.user_id(config.user, token)
                 followers = get_new_followers(config.server, user_id, token, config.max_followers, all_known_users, http=http)
                 add_user_posts(config.server, token, followers, recently_checked_users, all_known_users, seen_urls, seen_hosts, http=http, config=config)
 
