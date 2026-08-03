@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 import requests
-from requests.models import Response
 
 from fedifetcher import VERSION
 from fedifetcher.config import Config
@@ -14,52 +13,7 @@ from fedifetcher.http import (
     HttpClient,
     RateLimitError,
     RobotsCache,
-    get_redirect_url,
 )
-
-
-@patch("fedifetcher.http.requests")
-@patch("fedifetcher.http.logger")
-def test_get_redirect_url_success(mock_logger, mock_requests):
-    response = Response()
-    response.status_code = 200
-    mock_requests.head.return_value = response
-    assert get_redirect_url("https://test.com") == "https://test.com"
-    mock_logger.error.assert_not_called()
-    mock_logger.debug.assert_not_called()
-
-
-@patch("fedifetcher.http.requests")
-@patch("fedifetcher.http.logger")
-def test_get_redirect_url_redirected(mock_logger, mock_requests):
-    response = Response()
-    response.status_code = 302
-    response.headers = {"Location": "https://redirected.com"}
-    mock_requests.head.return_value = response
-    assert get_redirect_url("https://test.com") == "https://redirected.com"
-    mock_logger.error.assert_not_called()
-    mock_logger.debug.assert_called_once()
-
-
-@patch("fedifetcher.http.requests")
-@patch("fedifetcher.http.logger")
-def test_get_redirect_url_error_status_code(mock_logger, mock_requests):
-    response = Response()
-    response.status_code = 500
-    mock_requests.head.return_value = response
-    assert get_redirect_url("https://test.com") is None
-    mock_logger.error.assert_called_once()
-    mock_logger.debug.assert_not_called()
-
-
-@patch("fedifetcher.http.requests")
-@patch("fedifetcher.http.logger")
-def test_get_redirect_url_exception(mock_logger, mock_requests):
-    mock_requests.head.side_effect = requests.exceptions.RequestException
-    assert get_redirect_url("https://test.com") is None
-    mock_logger.error.assert_called_once()
-    mock_logger.debug.assert_not_called()
-
 
 ALLOW_ALL = "User-agent: *\nAllow: /\n"
 DENY_ALL = "User-agent: *\nDisallow: /\n"
@@ -282,3 +236,68 @@ def test_stale_robots_files_are_discarded(tmp_path):
     assert not stale.exists()
     assert fresh.exists()
     assert unrelated.exists()
+
+
+def test_get_redirect_url_returns_the_url_when_it_does_not_redirect(tmp_path):
+    session = Mock()
+    session.request.return_value = response(200)
+    client = make_client(tmp_path, session=session)
+
+    assert client.get_redirect_url("https://example.social/objects/1") == (
+        "https://example.social/objects/1"
+    )
+    assert session.request.call_args.kwargs["allow_redirects"] is False
+
+
+def test_get_redirect_url_follows_a_302(tmp_path):
+    session = Mock()
+    session.request.return_value = response(302, {"Location": "/notice/123"})
+    client = make_client(tmp_path, session=session)
+
+    assert client.get_redirect_url("https://example.social/objects/1") == "/notice/123"
+
+
+def test_get_redirect_url_gives_up_on_other_statuses(tmp_path):
+    session = Mock()
+    session.request.return_value = response(500)
+    client = make_client(tmp_path, session=session)
+
+    assert client.get_redirect_url("https://example.social/objects/1") is None
+
+
+def test_get_redirect_url_gives_up_when_the_request_fails(tmp_path):
+    session = Mock()
+    session.request.side_effect = requests.exceptions.RequestException
+    client = make_client(tmp_path, session=session)
+
+    assert client.get_redirect_url("https://example.social/objects/1") is None
+
+
+def test_get_redirect_url_sends_our_user_agent(tmp_path):
+    session = Mock()
+    session.request.return_value = response(200)
+    client = make_client(tmp_path, session=session)
+
+    client.get_redirect_url("https://example.social/objects/1")
+
+    assert session.request.call_args.kwargs["headers"]["User-Agent"] == client.user_agent
+
+
+def test_get_redirect_url_honours_the_blocklist(tmp_path):
+    session = Mock()
+    client = make_client(
+        tmp_path, session=session, instance_blocklist=("example.social",)
+    )
+
+    assert client.get_redirect_url("https://example.social/objects/1") is None
+
+    session.request.assert_not_called()
+
+
+def test_get_redirect_url_honours_robots(tmp_path):
+    session = Mock()
+    client = make_client(tmp_path, session=session, robots_text=DENY_ALL)
+
+    assert client.get_redirect_url("https://example.social/objects/1") is None
+
+    session.request.assert_not_called()

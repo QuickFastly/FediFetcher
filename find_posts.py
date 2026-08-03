@@ -15,7 +15,7 @@ from dateutil import parser
 
 from fedifetcher import VERSION
 from fedifetcher.config import Config, ConfigError
-from fedifetcher.http import HttpClient, build_callback_url, get_redirect_url
+from fedifetcher.http import HttpClient, build_callback_url
 from fedifetcher.state import ServerCache, TimestampedSet
 from fedifetcher.urls import (
     parse_url,
@@ -81,7 +81,7 @@ def add_post_with_context(post, server, access_token, seen_urls, seen_hosts, *, 
         seen_urls.add(post['url'])
         if ('replies_count' in post or 'in_reply_to_id' in post) and config.backfill_with_context:
             parsed_urls = {}
-            parsed = parse_url(post['url'], parsed_urls)
+            parsed = parse_url(post['url'], parsed_urls, http)
             if parsed is None:
                 return True
             known_context_urls = get_all_known_context_urls(server, [post],parsed_urls, seen_hosts, http=http)
@@ -495,9 +495,9 @@ def get_all_known_context_urls(server, reply_toots, parsed_urls, seen_hosts, *, 
     known_context_urls = set()
 
     for toot in reply_toots:
-        if toot_has_parseable_url(toot, parsed_urls):
+        if toot_has_parseable_url(toot, parsed_urls, http=http):
             url = toot["url"] if toot["reblog"] is None else toot["reblog"]["url"]
-            parsed_url = parse_url(url, parsed_urls)
+            parsed_url = parse_url(url, parsed_urls, http)
             if toot_context_can_be_fetched(toot) and toot_context_should_be_fetched(toot):
                 recently_checked_context[toot['uri']]['lastSeen'] = datetime.now(datetime.now().astimezone().tzinfo)
                 context = get_toot_context(parsed_url[0], parsed_url[1], url, seen_hosts, http=http)
@@ -513,27 +513,27 @@ def get_all_known_context_urls(server, reply_toots, parsed_urls, seen_hosts, *, 
     return known_context_urls
 
 
-def toot_has_parseable_url(toot,parsed_urls):
-    parsed = parse_url(toot["url"] if toot["reblog"] is None else toot["reblog"]["url"],parsed_urls)
+def toot_has_parseable_url(toot, parsed_urls, *, http):
+    parsed = parse_url(toot["url"] if toot["reblog"] is None else toot["reblog"]["url"], parsed_urls, http)
     if(parsed is None) :
         return False
     return True
 
 
 def get_all_replied_toot_server_ids(
-    server, reply_toots, replied_toot_server_ids, parsed_urls
+    server, reply_toots, replied_toot_server_ids, parsed_urls, *, http
 ):
     """get the server and ID of the toots the given toots replied to"""
     return filter(
         lambda x: x is not None,
         (
-            get_replied_toot_server_id(server, toot, replied_toot_server_ids, parsed_urls)
+            get_replied_toot_server_id(server, toot, replied_toot_server_ids, parsed_urls, http=http)
             for toot in reply_toots
         ),
     )
 
 
-def get_replied_toot_server_id(server, toot, replied_toot_server_ids,parsed_urls):
+def get_replied_toot_server_id(server, toot, replied_toot_server_ids, parsed_urls, *, http):
     """get the server and ID of the toot the given toot replied to"""
     in_reply_to_id = toot["in_reply_to_id"]
     in_reply_to_account_id = toot["in_reply_to_account_id"]
@@ -551,12 +551,12 @@ def get_replied_toot_server_id(server, toot, replied_toot_server_ids,parsed_urls
     if o_url in replied_toot_server_ids:
         return replied_toot_server_ids[o_url]
 
-    url = get_redirect_url(o_url)
+    url = http.get_redirect_url(o_url)
 
     if url is None:
         return None
 
-    match = parse_url(url,parsed_urls)
+    match = parse_url(url, parsed_urls, http)
     if match is not None:
         replied_toot_server_ids[o_url] = (url, match)
         return (url, match)
@@ -1223,7 +1223,8 @@ if __name__ == "__main__":
                 known_context_urls = get_all_known_context_urls(config.server, reply_toots,parsed_urls, seen_hosts, http=http)
                 seen_urls.update(known_context_urls)
                 replied_toot_ids = get_all_replied_toot_server_ids(
-                    config.server, reply_toots, replied_toot_server_ids, parsed_urls
+                    config.server, reply_toots, replied_toot_server_ids, parsed_urls,
+                    http=http,
                 )
                 context_urls = get_all_context_urls(config.server, replied_toot_ids, seen_hosts, http=http)
                 add_context_urls(config.server, token, context_urls, seen_urls, http=http)

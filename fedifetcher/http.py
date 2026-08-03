@@ -29,29 +29,6 @@ class RateLimitError(Exception):
     """Raised when a rate limited request ran out of retries"""
 
 
-def get_redirect_url(url: str) -> str | None:
-    """get the URL given URL redirects to"""
-    try:
-        resp = requests.head(url, allow_redirects=False, timeout=5,headers={
-            'User-Agent': 'FediFetcher (https://go.thms.uk/mgr)'
-        })
-    except Exception as ex:
-        logger.error(f"Error getting redirect URL for URL {url}. Exception: {ex}")
-        return None
-
-    if resp.status_code == 200:
-        return url
-    elif resp.status_code == 302:
-        redirect_url = resp.headers["Location"]
-        logger.debug(f"Discovered redirect for URL {url}")
-        return redirect_url
-    else:
-        logger.error(
-            f"Error getting redirect URL for URL {url}. Status code: {resp.status_code}"
-        )
-        return None
-
-
 class RobotsCache:
     """Remembers each host's robots.txt, in memory and on disk.
 
@@ -189,6 +166,26 @@ class HttpClient:
             max_tries=max_tries, backoff=backoff,
         )
 
+    def get_redirect_url(self, url: str) -> str | None:
+        """get the URL given URL redirects to"""
+        try:
+            resp = self._request("HEAD", url, allow_redirects=False)
+        except Exception as ex:
+            logger.error(f"Error getting redirect URL for URL {url}. Exception: {ex}")
+            return None
+
+        if resp.status_code == 200:
+            return url
+        elif resp.status_code == 302:
+            redirect_url = resp.headers["Location"]
+            logger.debug(f"Discovered redirect for URL {url}")
+            return redirect_url
+        else:
+            logger.error(
+                f"Error getting redirect URL for URL {url}. Status code: {resp.status_code}"
+            )
+            return None
+
     def _request(
         self,
         method: str,
@@ -199,6 +196,7 @@ class HttpClient:
         max_tries: int = 5,
         backoff: float = 0.5,
         ignore_robots_txt: bool = False,
+        allow_redirects: bool = True,
     ) -> requests.Response:
         h = dict(headers or {})
         h.setdefault('User-Agent', self.user_agent)
@@ -211,7 +209,8 @@ class HttpClient:
 
         while True:
             response = self._session.request(
-                method, url, json=json, headers=h, timeout=timeout
+                method, url, json=json, headers=h, timeout=timeout,
+                allow_redirects=allow_redirects,
             )
             if response.status_code != 429:
                 return response
@@ -252,5 +251,4 @@ __all__ = [
     "RateLimitError",
     "RobotsCache",
     "build_callback_url",
-    "get_redirect_url",
 ]

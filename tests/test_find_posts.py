@@ -666,12 +666,12 @@ def test_get_all_known_context_urls(
 
     # check if parseable url method called twice and the arguments correct
     assert toot_has_parseable_url.call_count == 2
-    toot_has_parseable_url.assert_any_call(reply_toots[0], parsed_urls)
-    toot_has_parseable_url.assert_any_call(reply_toots[1], parsed_urls)
+    toot_has_parseable_url.assert_any_call(reply_toots[0], parsed_urls, http=http)
+    toot_has_parseable_url.assert_any_call(reply_toots[1], parsed_urls, http=http)
 
     # check if parse url method was first called with the first toot url then with its reblog url
-    parse_url.assert_any_call("test_url_1", parsed_urls)
-    parse_url.assert_any_call("reblog_url_2", parsed_urls)
+    parse_url.assert_any_call("test_url_1", parsed_urls, http)
+    parse_url.assert_any_call("reblog_url_2", parsed_urls, http)
 
     # check if format of logger.info message is correct
     mock_logger.info.assert_called_once_with("Found 2 known context toots")
@@ -681,53 +681,57 @@ def test_get_all_known_context_urls(
 
 
 def test_toot_has_parseable_url_with_parseable_url():
+    http = Mock()
     toot = {"url": "http://test.com", "reblog": None}
     parsed_urls = []
     with patch("find_posts.parse_url", return_value="something") as mock_parse_url:
-        assert find_posts.toot_has_parseable_url(toot, parsed_urls)
-        mock_parse_url.assert_called_once_with("http://test.com", parsed_urls)
+        assert find_posts.toot_has_parseable_url(toot, parsed_urls, http=http)
+        mock_parse_url.assert_called_once_with("http://test.com", parsed_urls, http)
 
 
 def test_toot_has_parseable_url_with_unparseable_url():
+    http = Mock()
     toot = {"url": "http://test.com", "reblog": None}
     parsed_urls = []
     with patch("find_posts.parse_url", return_value=None) as mock_parse_url:
-        assert not find_posts.toot_has_parseable_url(toot, parsed_urls)
-        mock_parse_url.assert_called_once_with("http://test.com", parsed_urls)
+        assert not find_posts.toot_has_parseable_url(toot, parsed_urls, http=http)
+        mock_parse_url.assert_called_once_with("http://test.com", parsed_urls, http)
 
 
 def test_get_replied_toot_server_id_no_mentions():
+    http = Mock()
     toot = {"in_reply_to_id": "1", "in_reply_to_account_id": "1", "mentions": []}
-    assert find_posts.get_replied_toot_server_id("server", toot, {}, {}) is None
+    assert find_posts.get_replied_toot_server_id("server", toot, {}, {}, http=http) is None
 
 
 def test_get_replied_toot_server_id_no_url_redirect():
+    http = Mock()
+    http.get_redirect_url.return_value = None
     toot = {
         "in_reply_to_id": "1",
         "in_reply_to_account_id": "1",
         "mentions": [{"id": "1", "acct": "account"}],
     }
-    with patch("find_posts.get_redirect_url", return_value=None):
-        assert find_posts.get_replied_toot_server_id("server", toot, {}, {}) is None
+    assert find_posts.get_replied_toot_server_id("server", toot, {}, {}, http=http) is None
 
 
 def test_get_replied_toot_server_id_with_url_redirect():
+    http = Mock()
+    http.get_redirect_url.return_value = "redirect_url"
     toot = {
         "in_reply_to_id": "1",
         "in_reply_to_account_id": "1",
         "mentions": [{"id": "1", "acct": "account"}],
     }
-    with patch("find_posts.get_redirect_url", return_value="redirect_url"), patch(
-        "find_posts.parse_url", return_value="match"
-    ) as mock_parse:
-        assert find_posts.get_replied_toot_server_id("server", toot, {}, {}) == (
-            "redirect_url",
-            "match",
-        )
-        mock_parse.assert_called_once_with("redirect_url", {})
+    with patch("find_posts.parse_url", return_value="match") as mock_parse:
+        assert find_posts.get_replied_toot_server_id(
+            "server", toot, {}, {}, http=http
+        ) == ("redirect_url", "match")
+        mock_parse.assert_called_once_with("redirect_url", {}, http)
 
 
 def test_get_replied_toot_server_id_with_existing_replied_toot_server_ids():
+    http = Mock()
     toot = {
         "in_reply_to_id": "1",
         "in_reply_to_account_id": "1",
@@ -736,7 +740,7 @@ def test_get_replied_toot_server_id_with_existing_replied_toot_server_ids():
     replied_toot_server_ids = {"https://server/@account/1": ("url", "match")}
 
     assert find_posts.get_replied_toot_server_id(
-        "server", toot, replied_toot_server_ids, {}
+        "server", toot, replied_toot_server_ids, {}, http=http
     ) == ("url", "match")
 
 

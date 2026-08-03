@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-from fedifetcher.http import get_redirect_url
+if TYPE_CHECKING:
+    from fedifetcher.http import HttpClient
 
 logger = logging.getLogger("FediFetcher")
 
@@ -54,12 +54,12 @@ def parse_mastodon_uri(uri: str) -> PostRef | None:
     return None
 
 
-def parse_pleroma_url(url: str) -> PostRef | None:
+def parse_pleroma_url(url: str, http: HttpClient) -> PostRef | None:
     """parse a Pleroma URL and return the server and ID"""
     match = re.match(r"https://(?P<server>[^/]+)/objects/(?P<toot_id>[^/]+)", url)
     if match is not None:
         server = match.group("server")
-        redirect = get_redirect_url(url)
+        redirect = http.get_redirect_url(url)
         if redirect is None:
             return None
 
@@ -149,49 +149,40 @@ def parse_peertube_profile_url(url: str) -> UserRef | None:
     return None
 
 
-_POST_PARSERS: Final[tuple[Callable[[str], PostRef | None], ...]] = (
-    parse_mastodon_url,
-    parse_mastodon_uri,
-    parse_pleroma_url,
-    parse_pleroma_uri,
-    parse_lemmy_url,
-    parse_pixelfed_url,
-    parse_misskey_url,
-    parse_peertube_url,
-)
-
-# Pixelfed profile paths do not use a subdirectory, so its matcher accepts any
-# https://host/segment and has to stay last.
-_PROFILE_PARSERS: Final[tuple[Callable[[str], UserRef | None], ...]] = (
-    parse_mastodon_profile_url,
-    parse_pleroma_profile_url,
-    parse_lemmy_profile_url,
-    parse_peertube_profile_url,
-    parse_pixelfed_profile_url,
-)
-
-
 def parse_user_url(url: str) -> UserRef | None:
-    for parser in _PROFILE_PARSERS:
-        match = parser(url)
-        if match is not None:
-            return match
+    match = (
+        parse_mastodon_profile_url(url)
+        or parse_pleroma_profile_url(url)
+        or parse_lemmy_profile_url(url)
+        or parse_peertube_profile_url(url)
+        # Pixelfed profile paths do not use a subdirectory, so this matcher
+        # accepts any https://host/segment and has to stay last.
+        or parse_pixelfed_profile_url(url)
+    )
+    if match is None:
+        logger.error(f"Error parsing Profile URL {url}")
+    return match
 
-    logger.error(f"Error parsing Profile URL {url}")
 
-    return None
+def parse_url(
+    url: str, parsed_urls: dict[str, PostRef | None], http: HttpClient
+) -> PostRef | None:
+    """Work out which server and post a URL refers to, remembering the answer"""
+    if url in parsed_urls:
+        return parsed_urls[url]
 
-
-def parse_url(url: str, parsed_urls: dict[str, PostRef | None]) -> PostRef | None:
-    if url not in parsed_urls:
-        for parser in _POST_PARSERS:
-            match = parser(url)
-            if match is not None:
-                parsed_urls[url] = match
-                break
-
-    if url not in parsed_urls:
+    match = (
+        parse_mastodon_url(url)
+        or parse_mastodon_uri(url)
+        or parse_pleroma_url(url, http)
+        or parse_pleroma_uri(url)
+        or parse_lemmy_url(url)
+        or parse_pixelfed_url(url)
+        or parse_misskey_url(url)
+        or parse_peertube_url(url)
+    )
+    if match is None:
         logger.error(f"Error parsing toot URL {url}")
-        parsed_urls[url] = None
 
-    return parsed_urls[url]
+    parsed_urls[url] = match
+    return match

@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -121,26 +121,26 @@ def test_parse_mastodon_uri():
     assert parse_mastodon_uri(uri) is None
 
 
-@patch("fedifetcher.urls.get_redirect_url")
-def test_parse_pleroma_url(mock_get_redirect_url):
-    mock_get_redirect_url.return_value = "/notice/123"
+def test_parse_pleroma_url():
+    http = Mock()
+    http.get_redirect_url.return_value = "/notice/123"
 
-    result = parse_pleroma_url("https://example.com/objects/567")
+    result = parse_pleroma_url("https://example.com/objects/567", http)
     assert result == ("example.com", "123")
 
-    mock_get_redirect_url.return_value = None
-    result = parse_pleroma_url("https://example.com/objects/567")
+    http.get_redirect_url.return_value = None
+    result = parse_pleroma_url("https://example.com/objects/567", http)
     assert result is None
 
-    result = parse_pleroma_url("not a url")
+    result = parse_pleroma_url("not a url", http)
     assert result is None
 
-    mock_get_redirect_url.return_value = "/different_pattern/123"
-    result = parse_pleroma_url("https://example.com/objects/567")
+    http.get_redirect_url.return_value = "/different_pattern/123"
+    result = parse_pleroma_url("https://example.com/objects/567", http)
     assert result is None
 
-    mock_get_redirect_url.return_value = "/notice/789"
-    result = parse_pleroma_url("https://different.example.com/objects/111")
+    http.get_redirect_url.return_value = "/notice/789"
+    result = parse_pleroma_url("https://different.example.com/objects/111", http)
     assert result == ("different.example.com", "789")
 
 def test_parse_pleroma_uri():
@@ -221,6 +221,7 @@ def test_parse_peertube_url_valid():
     assert result == expected
 
 def test_parse_url():
+    http = Mock()
     tests = [
         (
             "https://video.infosec.exchange/videos/watch/56f1d0b5-d98f-4bad-b1e7-648ae074ab9d",
@@ -236,7 +237,7 @@ def test_parse_url():
         )
     ]
     for (url,expected) in tests:
-        result = parse_url(url, {})
+        result = parse_url(url, {}, http)
         assert result == expected
 
 
