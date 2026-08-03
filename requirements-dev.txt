@@ -1,5 +1,6 @@
 -r requirements.txt
 mypy==2.3.0
+pytest==9.0.3
 pytest-cov==6.0.0
 pytest-randomly==4.1.0
 responses==0.26.2
