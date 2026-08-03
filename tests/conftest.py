@@ -2,6 +2,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from fedifetcher.store import State
+
 
 @pytest.fixture
 def http():
@@ -20,3 +22,9 @@ def response(status_code=200, json_data=None, text=""):
 @pytest.fixture
 def reply():
     return response
+
+
+@pytest.fixture
+def state():
+    """Real state: it is a plain bag of collections, so mocking it hides bugs"""
+    return State()

@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from fedifetcher.state import ServerCache, TimestampedSet
+from fedifetcher.state import ContextCache, ServerCache, TimestampedSet
 
 
 def ago(**kwargs):
@@ -137,3 +137,82 @@ def test_server_cache_roundtrips_through_json():
     restored = ServerCache(json.loads(hosts.toJSON()))
 
     assert restored.get("example.org")["last_checked"] == when
+
+
+def test_context_is_fetched_the_first_time():
+    cache = ContextCache()
+    assert cache.should_fetch("uri", ago(hours=1))
+
+
+def test_context_is_not_refetched_immediately():
+    cache = ContextCache()
+    created = ago(hours=1)
+    cache.mark_fetched("uri", created)
+    assert not cache.should_fetch("uri", created)
+
+
+def test_a_brand_new_post_is_rechecked_after_a_minute():
+    cache = ContextCache({"uri": {"created_at": ago(minutes=30), "lastSeen": ago(minutes=2)}})
+    assert cache.should_fetch("uri", ago(minutes=30))
+
+
+def test_a_post_from_today_waits_ten_minutes():
+    cache = ContextCache({"uri": {"created_at": ago(hours=5), "lastSeen": ago(minutes=2)}})
+    assert not cache.should_fetch("uri", ago(hours=5))
+
+    cache = ContextCache({"uri": {"created_at": ago(hours=5), "lastSeen": ago(minutes=20)}})
+    assert cache.should_fetch("uri", ago(hours=5))
+
+
+def test_an_old_post_waits_an_hour():
+    cache = ContextCache({"uri": {"created_at": ago(days=5), "lastSeen": ago(minutes=30)}})
+    assert not cache.should_fetch("uri", ago(days=5))
+
+    cache = ContextCache({"uri": {"created_at": ago(days=5), "lastSeen": ago(hours=2)}})
+    assert cache.should_fetch("uri", ago(days=5))
+
+
+def test_should_fetch_does_not_record_anything():
+    """Asking the question must not change the answer next time"""
+    cache = ContextCache()
+    assert cache.should_fetch("uri", ago(days=1))
+    assert "uri" not in cache
+    assert cache.should_fetch("uri", ago(days=1))
+
+
+def test_context_entries_expire():
+    cache = ContextCache({
+        "old": {"created_at": ago(days=30), "lastSeen": ago(days=30)},
+        "fresh": {"created_at": ago(days=30), "lastSeen": ago(hours=1)},
+    })
+
+    assert cache.expire_older_than(timedelta(days=7)) == 1
+
+    assert "old" not in cache
+    assert "fresh" in cache
+
+
+def test_context_entries_survive_a_round_trip():
+    cache = ContextCache()
+    cache.mark_fetched("uri", ago(days=1))
+
+    restored = ContextCache(json.loads(cache.toJSON()))
+
+    assert not restored.should_fetch("uri", ago(days=1))
+
+
+def test_context_entries_from_older_versions_are_read():
+    """Older releases stored the whole post; only two of its fields matter"""
+    cache = ContextCache({
+        "uri": {
+            "created_at": ago(days=1).isoformat(),
+            "lastSeen": ago(minutes=1).isoformat(),
+            "content": "<p>a whole toot</p>",
+            "account": {"acct": "someone"},
+        }
+    })
+    assert not cache.should_fetch("uri", ago(days=1))
+
+
+def test_context_entries_that_were_never_completed_are_ignored():
+    assert len(ContextCache({"uri": {"created_at": ago(days=1)}})) == 0

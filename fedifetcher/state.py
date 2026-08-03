@@ -113,3 +113,72 @@ class ServerCache:
 
     def toJSON(self) -> str:
         return json.dumps(self._dict, default=str)
+
+
+class ContextCache:
+    """Remembers when we last fetched the replies to a post.
+
+    Fresh posts gain replies quickly and old ones rarely, so how long we wait
+    before looking again depends on how old the post is.
+    """
+
+    def __init__(self, entries: dict[str, dict[str, Any]] | None = None) -> None:
+        self._entries: dict[str, dict[str, datetime]] = {}
+        for uri, entry in (entries or {}).items():
+            if 'lastSeen' not in entry or 'created_at' not in entry:
+                continue
+            self._entries[uri] = {
+                'lastSeen': _as_datetime(entry['lastSeen']),
+                'created_at': _as_datetime(entry['created_at']),
+            }
+
+    def should_fetch(self, uri: str, created_at: datetime | str) -> bool:
+        entry = self._entries.get(uri)
+        if entry is None:
+            return True
+
+        last_seen = entry['lastSeen']
+        created = entry['created_at']
+        since_last_seen = (datetime.now(last_seen.tzinfo) - last_seen).total_seconds()
+        age = (datetime.now(created.tzinfo) - created).total_seconds()
+
+        if age <= 60 * 60 and since_last_seen >= 60:
+            # For the first hour: allow refetching once per minute
+            return True
+        if age <= 24 * 60 * 60 and since_last_seen >= 10 * 60:
+            # For the rest of the first day: once every 10 minutes
+            return True
+        if since_last_seen >= 60 * 60:
+            # After that: hourly
+            return True
+        return False
+
+    def mark_fetched(self, uri: str, created_at: datetime | str) -> None:
+        self._entries[uri] = {
+            'lastSeen': _now(),
+            'created_at': _as_datetime(created_at),
+        }
+
+    def expire_older_than(self, age: timedelta) -> int:
+        """Forget posts we have not seen in a while, so this cannot grow forever"""
+        expired = [
+            uri
+            for uri, entry in self._entries.items()
+            if datetime.now(entry['lastSeen'].tzinfo) - entry['lastSeen'] > age
+        ]
+        for uri in expired:
+            del self._entries[uri]
+        return len(expired)
+
+    def __contains__(self, uri: object) -> bool:
+        return uri in self._entries
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def toJSON(self) -> str:
+        return json.dumps(self._entries, default=str)
+
+
+def _as_datetime(value: datetime | str) -> datetime:
+    return parser.parse(value) if isinstance(value, str) else value
