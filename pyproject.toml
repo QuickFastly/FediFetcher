@@ -22,8 +22,8 @@ warn_redundant_casts = true
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["find_posts", "fedifetcher"]
+source = ["fedifetcher"]
 
 [tool.coverage.report]
-exclude_also = ["if TYPE_CHECKING:"]
-fail_under = 80
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]
+fail_under = 85
