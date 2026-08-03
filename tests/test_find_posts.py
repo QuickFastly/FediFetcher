@@ -3,7 +3,6 @@ import re
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
-from urllib import parse
 
 import pytest
 from requests.models import Response
@@ -13,7 +12,6 @@ from find_posts import (
     add_context_urls,
     add_user_posts,
     filter_known_users,
-    get,
     get_bookmarks,
     get_favourites,
     get_lemmy_comment_context,
@@ -28,7 +26,6 @@ from find_posts import (
     get_user_id,
     get_user_posts_mastodon,
     get_user_posts_misskey,
-    post,
     set_server_apis,
     user_has_opted_out,
 )
@@ -36,11 +33,12 @@ from find_posts import (
 
 @patch("find_posts.get_paginated_mastodon")
 def test_get_bookmarks(mock_get_paginated_mastodon):
+    http = Mock()
     server = "test_server"
     access_token = "test_token"
     max = 5
 
-    get_bookmarks(server, access_token, max)
+    get_bookmarks(server, access_token, max, http=http)
 
     mock_get_paginated_mastodon.assert_called_once_with(
         f"https://{server}/api/v1/bookmarks",
@@ -48,7 +46,7 @@ def test_get_bookmarks(mock_get_paginated_mastodon):
         {
             "Authorization": f"Bearer {access_token}",
         },
-    )
+        http=http)
 
 
 @pytest.mark.parametrize(
@@ -59,19 +57,21 @@ def test_get_bookmarks(mock_get_paginated_mastodon):
     ],
 )
 def test_get_bookmarks_parameterized(server, access_token, max):
+    http = Mock()
     with patch("find_posts.get_paginated_mastodon") as mock_get_paginated_mastodon:
-        get_bookmarks(server, access_token, max)
+        get_bookmarks(server, access_token, max, http=http)
         mock_get_paginated_mastodon.assert_called_once_with(
             f"https://{server}/api/v1/bookmarks",
             max,
             {
                 "Authorization": f"Bearer {access_token}",
             },
-        )
+        http=http)
 
 
 @patch("find_posts.get_paginated_mastodon")
 def test_get_favourites(mock_get_paginated_mastodon):
+    http = Mock()
     server = "some.server"
     access_token = "token123"
     max = 5
@@ -79,7 +79,7 @@ def test_get_favourites(mock_get_paginated_mastodon):
 
     mock_get_paginated_mastodon.return_value = expected_result
 
-    result = get_favourites(server, access_token, max)
+    result = get_favourites(server, access_token, max, http=http)
 
     mock_get_paginated_mastodon.assert_called_once_with(
         f"https://{server}/api/v1/favourites",
@@ -87,7 +87,7 @@ def test_get_favourites(mock_get_paginated_mastodon):
         {
             "Authorization": f"Bearer {access_token}",
         },
-    )
+        http=http)
     assert result == expected_result
 
 
@@ -95,6 +95,8 @@ def test_get_favourites(mock_get_paginated_mastodon):
 @patch("find_posts.add_post_with_context")
 @patch("find_posts.logger")
 def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts):
+    config = Mock()
+    http = Mock()
     server = "test_server"
     access_token = "test_token"
     followings = [
@@ -120,11 +122,11 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts):
         all_known_users,
         seen_urls,
         seen_hosts,
-    )
+        http=http, config=config)
 
     mock_get_posts.assert_called_once_with(
-        followings[0], known_followings, server, seen_hosts
-    )
+        followings[0], known_followings, server, seen_hosts,
+        http=http)
     assert mock_add_post.call_count == 2
     assert len(seen_urls) == 2
     assert "user1" in known_followings
@@ -136,6 +138,8 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts):
 @patch("find_posts.add_post_with_context")
 @patch("find_posts.logger")
 def test_add_user_posts_with_no_new_posts(mock_logger, mock_add_post, mock_get_posts):
+    config = Mock()
+    http = Mock()
     server = "test_server"
     access_token = "test_token"
     followings = [{"acct": "user1", "url": "https://user1.com"}]
@@ -158,11 +162,11 @@ def test_add_user_posts_with_no_new_posts(mock_logger, mock_add_post, mock_get_p
         all_known_users,
         seen_urls,
         seen_hosts,
-    )
+        http=http, config=config)
 
     mock_get_posts.assert_called_once_with(
-        followings[0], known_followings, server, seen_hosts
-    )
+        followings[0], known_followings, server, seen_hosts,
+        http=http)
     mock_add_post.assert_not_called()
     assert len(seen_urls) == 2
     assert "user1" in known_followings
@@ -184,6 +188,8 @@ def mock_functions():
 
 
 def test_add_post_with_context_post_not_added(mock_functions):
+    config = Mock()
+    http = Mock()
     add_context_url, _, _, _ = mock_functions
     add_context_url.return_value = False
 
@@ -194,10 +200,10 @@ def test_add_post_with_context_post_not_added(mock_functions):
     seen_hosts = set()
 
     result = find_posts.add_post_with_context(
-        post, server, access_token, seen_urls, seen_hosts
-    )
+        post, server, access_token, seen_urls, seen_hosts,
+        http=http, config=config)
 
-    add_context_url.assert_called_once_with(post["url"], server, access_token)
+    add_context_url.assert_called_once_with(post["url"], server, access_token, http=http)
 
     assert result is False
 
@@ -221,9 +227,8 @@ def userName():
 
 
 def test_get_user_posts_mastodon_success(userName, webserver):
-    with patch("find_posts.get_user_id") as mock_get_user_id, patch(
-        "find_posts.get"
-    ) as mock_get:
+    http = Mock()
+    with patch("find_posts.get_user_id") as mock_get_user_id:
 
         # Mocking get_user_id
         mock_get_user_id.return_value = 1234
@@ -232,16 +237,15 @@ def test_get_user_posts_mastodon_success(userName, webserver):
         mock_response = Response()
         mock_response.status_code = 200
         mock_response._content = b'{"data": "Test"}'
-        mock_get.return_value = mock_response
+        http.get.return_value = mock_response
 
-        result = get_user_posts_mastodon(userName, webserver)
+        result = get_user_posts_mastodon(userName, webserver, http=http)
         assert result == {"data": "Test"}
 
 
 def test_get_user_posts_mastodon_user_not_found(userName, webserver):
-    with patch("find_posts.get_user_id") as mock_get_user_id, patch(
-        "find_posts.get"
-    ) as mock_get:
+    http = Mock()
+    with patch("find_posts.get_user_id") as mock_get_user_id:
 
         # Mocking get_user_id
         mock_get_user_id.return_value = 1234
@@ -249,16 +253,15 @@ def test_get_user_posts_mastodon_user_not_found(userName, webserver):
         # Mocking get function call
         mock_response = Response()
         mock_response.status_code = 404
-        mock_get.return_value = mock_response
+        http.get.return_value = mock_response
 
-        result = get_user_posts_mastodon(userName, webserver)
+        result = get_user_posts_mastodon(userName, webserver, http=http)
         assert result is None
 
 
 def test_get_user_posts_mastodon_error_status_code(userName, webserver):
-    with patch("find_posts.get_user_id") as mock_get_user_id, patch(
-        "find_posts.get"
-    ) as mock_get:
+    http = Mock()
+    with patch("find_posts.get_user_id") as mock_get_user_id:
 
         # Mocking get_user_id
         mock_get_user_id.return_value = 1234
@@ -266,86 +269,86 @@ def test_get_user_posts_mastodon_error_status_code(userName, webserver):
         # Mocking get function call
         mock_response = Response()
         mock_response.status_code = 500
-        mock_get.return_value = mock_response
+        http.get.return_value = mock_response
 
-        result = get_user_posts_mastodon(userName, webserver)
+        result = get_user_posts_mastodon(userName, webserver, http=http)
         assert result is None
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_user_posts_lemmy_community(mock_logger, mock_get):
+def test_get_user_posts_lemmy_community(mock_logger):
+    http = Mock()
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"posts": [{"post": {"ap_id": "test_url"}}]}
-    mock_get.return_value = mock_response
+    http.get.return_value = mock_response
 
     result = find_posts.get_user_posts_lemmy(
-        "test_user", "https://test.com/c/test_user", "test.com"
-    )
+        "test_user", "https://test.com/c/test_user", "test.com",
+        http=http)
 
     assert result == [{"ap_id": "test_url", "url": "test_url"}]
-    mock_get.assert_called_once_with(
+    http.get.assert_called_once_with(
         "https://test.com/api/v3/post/list?community_name=test_user&sort=New&limit=50"
     )
     mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_user_posts_lemmy_user(mock_logger, mock_get):
+def test_get_user_posts_lemmy_user(mock_logger):
+    http = Mock()
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "posts": [{"post": {"ap_id": "post_url"}}],
         "comments": [{"post": {"ap_id": "comment_url"}}],
     }
-    mock_get.return_value = mock_response
+    http.get.return_value = mock_response
 
     result = find_posts.get_user_posts_lemmy(
-        "test_user", "https://test.com/u/test_user", "test.com"
-    )
+        "test_user", "https://test.com/u/test_user", "test.com",
+        http=http)
 
     assert result == [
         {"ap_id": "comment_url", "url": "comment_url"},
         {"ap_id": "post_url", "url": "post_url"},
     ]
-    mock_get.assert_called_once_with(
+    http.get.assert_called_once_with(
         "https://test.com/api/v3/user?username=test_user&sort=New&limit=50"
     )
     mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_user_posts_peertube(mock_logger, mock_get):
+def test_get_user_posts_peertube(mock_logger):
+    http = Mock()
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"data": "test_data"}
-    mock_get.return_value = mock_response
+    http.get.return_value = mock_response
 
-    result = find_posts.get_user_posts_peertube("test_user", "test_webserver")
+    result = find_posts.get_user_posts_peertube("test_user", "test_webserver", http=http)
 
     assert result == "test_data"
-    mock_get.assert_called_once_with(
+    http.get.assert_called_once_with(
         "https://test_webserver/api/v1/accounts/test_user/videos"
     )
     mock_logger.error.assert_not_called()
 
 
-@patch("find_posts.post")
 @patch("find_posts.logger")
-def test_get_user_posts_misskey(mock_logger, mock_post):
-    mock_response = mock_post.return_value
+def test_get_user_posts_misskey(mock_logger):
+    http = Mock()
+    mock_response = http.post.return_value
     mock_response.status_code = 200
     mock_response.json.return_value = [
         {"host": None, "id": "id1"},
         {"host": "host1", "id": "id2"},
     ]
 
-    result = get_user_posts_misskey("username", "webserver")
+    result = get_user_posts_misskey("username", "webserver", http=http)
 
-    mock_post.assert_called_with(
+    http.post.assert_called_with(
         "https://webserver/api/users/notes", {"userId": "id1", "limit": 40}
     )
     mock_logger.error.assert_not_called()
@@ -358,10 +361,11 @@ def test_get_user_posts_misskey(mock_logger, mock_post):
 def test_get_new_follow_requests(
     mock_logger, mock_filter_known_users, mock_get_paginated_mastodon
 ):
+    http = Mock()
     mock_get_paginated_mastodon.return_value = ["request1", "request2"]
     mock_filter_known_users.return_value = ["request1"]
 
-    result = get_new_follow_requests("server", "access_token", 10, ["known_following"])
+    result = get_new_follow_requests("server", "access_token", 10, ["known_following"], http=http)
 
     mock_get_paginated_mastodon.assert_called_with(
         "https://server/api/v1/follow_requests",
@@ -369,7 +373,7 @@ def test_get_new_follow_requests(
         {
             "Authorization": "Bearer access_token",
         },
-    )
+        http=http)
     mock_filter_known_users.assert_called_with(
         ["request1", "request2"], ["known_following"]
     )
@@ -431,6 +435,7 @@ def test_filter_known_users_no_users():
 def test_get_new_followers(
     mock_logger, mock_filter_known_users, mock_get_paginated_mastodon
 ):
+    http = Mock()
     mock_get_paginated_mastodon.return_value = ["follower1", "follower2", "follower3"]
     mock_filter_known_users.return_value = ["follower2", "follower3"]
 
@@ -441,13 +446,13 @@ def test_get_new_followers(
     known_followers = ["follower1"]
 
     expected_result = ["follower2", "follower3"]
-    result = find_posts.get_new_followers(server, user_id, access_token, max, known_followers)
+    result = find_posts.get_new_followers(server, user_id, access_token, max, known_followers, http=http)
 
     mock_get_paginated_mastodon.assert_called_once_with(
         f"https://{server}/api/v1/accounts/{user_id}/followers", max, {
             "Authorization": f"Bearer {access_token}",
         },
-    )
+        http=http)
     mock_filter_known_users.assert_called_once_with(
         ["follower1", "follower2", "follower3"], known_followers
     )
@@ -462,14 +467,15 @@ def test_get_new_followers(
 def test_get_new_followings(
     mock_logger, mock_filter_known_users, mock_get_paginated_mastodon
 ):
+    http = Mock()
     mock_get_paginated_mastodon.return_value = ["user1", "user2", "user3"]
     mock_filter_known_users.return_value = ["user1", "user2"]
-    result = get_new_followings("server", "100", "access_token", 5, "known_users")
+    result = get_new_followings("server", "100", "access_token", 5, "known_users", http=http)
     mock_get_paginated_mastodon.assert_called_with(
         "https://server/api/v1/accounts/100/following", 5, {
             "Authorization": "Bearer access_token",
-        }
-    )
+        },
+        http=http)
     mock_filter_known_users.assert_called_with(
         ["user1", "user2", "user3"], "known_users"
     )
@@ -477,27 +483,27 @@ def test_get_new_followings(
     mock_logger.info.assert_called_with("Got 3 followings, 2 of which are new")
 
 
-@patch("find_posts.get")
-def test_get_user_id_with_username(mock_get):
+def test_get_user_id_with_username():
+    http = Mock()
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"id": "123"}
-    mock_get.return_value = mock_response
-    result = get_user_id("server", user="test_user")
-    mock_get.assert_called_with(
+    http.get.return_value = mock_response
+    result = get_user_id("server", user="test_user", http=http)
+    http.get.assert_called_with(
         "https://server/api/v1/accounts/lookup?acct=test_user", headers={}
     )
     assert result == "123"
 
 
-@patch("find_posts.get")
-def test_get_user_id_with_access_token(mock_get):
+def test_get_user_id_with_access_token():
+    http = Mock()
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"id": "456"}
-    mock_get.return_value = mock_response
-    result = get_user_id("server", access_token="test_token")
-    mock_get.assert_called_with(
+    http.get.return_value = mock_response
+    result = get_user_id("server", access_token="test_token", http=http)
+    http.get.assert_called_with(
         "https://server/api/v1/accounts/verify_credentials",
         headers={
             "Authorization": "Bearer test_token",
@@ -507,57 +513,59 @@ def test_get_user_id_with_access_token(mock_get):
 
 
 def test_get_user_id_with_no_user_or_token():
+    http = Mock()
     with pytest.raises(
         Exception,
         match="You must supply either a user name or an access token, to get an user ID",
     ):
-        get_user_id("server")
+        get_user_id("server", http=http)
 
 
-@patch("find_posts.get")
-def test_get_user_id_with_404_status_code(mock_get):
+def test_get_user_id_with_404_status_code():
+    http = Mock()
     mock_response = MagicMock()
     mock_response.status_code = 404
-    mock_get.return_value = mock_response
+    http.get.return_value = mock_response
     with pytest.raises(
         Exception, match="User test_user was not found on server server."
     ):
-        get_user_id("server", user="test_user")
+        get_user_id("server", user="test_user", http=http)
 
 
-@patch("find_posts.get")
-def test_get_user_id_with_non_200_or_404_status_code(mock_get):
+def test_get_user_id_with_non_200_or_404_status_code():
+    http = Mock()
     mock_response = MagicMock()
     mock_response.status_code = 500
-    mock_get.return_value = mock_response
+    http.get.return_value = mock_response
     with pytest.raises(
         Exception,
         match=re.escape(
             "Error getting URL https://server/api/v1/accounts/lookup?acct=test_user. Status code: 500"
         ),
     ):
-        get_user_id("server", user="test_user")
+        get_user_id("server", user="test_user", http=http)
 
 
 @patch("find_posts.get_toots")
 def test_get_timeline(mock_get_toots):
+    http = Mock()
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = ["toot1", "toot2", "toot3"]
     mock_response.links = {}
     mock_get_toots.return_value = mock_response
 
-    timeline = find_posts.get_timeline("server", "token", 5)
+    timeline = find_posts.get_timeline("server", "token", 5, http=http)
 
-    mock_get_toots.assert_any_call("https://server/api/v1/timelines/home", "token")
+    mock_get_toots.assert_any_call("https://server/api/v1/timelines/home", "token", http=http)
     assert len(timeline) == 3
 
 
-@patch("find_posts.get", autospec=True)
-def test_get_reply_toots_error_status_code(mock_get):
+def test_get_reply_toots_error_status_code():
+    http = Mock()
     mock_resp = Mock()
     mock_resp.status_code = 403
-    mock_get.return_value = mock_resp
+    http.get.return_value = mock_resp
     with pytest.raises(Exception) as e_info:
         find_posts.get_reply_toots(
             "test_user",
@@ -565,7 +573,7 @@ def test_get_reply_toots_error_status_code(mock_get):
             "test_token",
             ["some_seen_url"],
             datetime(2020, 1, 1),
-        )
+        http=http)
         assert (
             "Make sure you have the read:statuses scope enabled for your access token."
             in str(e_info.value)
@@ -628,6 +636,7 @@ def test_get_all_known_context_urls(
     toot_has_parseable_url,
     monkeypatch,
 ):
+    http = Mock()
     server = "test_server"
     reply_toots = [
         {"url": "test_url_1", "reblog": None, "uri": "test_uri_1"},
@@ -652,8 +661,8 @@ def test_get_all_known_context_urls(
     get_toot_context.return_value = ["context_item_1", "context_item_2"]
 
     result_urls = find_posts.get_all_known_context_urls(
-        server, reply_toots, parsed_urls, seen_hosts
-    )
+        server, reply_toots, parsed_urls, seen_hosts,
+        http=http)
 
     # check if parseable url method called twice and the arguments correct
     assert toot_has_parseable_url.call_count == 2
@@ -734,8 +743,9 @@ def test_get_replied_toot_server_id_with_existing_replied_toot_server_ids():
 @patch("find_posts.get_server_info")
 @patch("find_posts.logger")
 def test_get_toot_context_no_server_info(mock_logger, mock_server_info):
+    http = Mock()
     mock_server_info.return_value = None
-    assert get_toot_context("server1", "toot1", "url1", {}) == []
+    assert get_toot_context("server1", "toot1", "url1", {}, http=http) == []
     mock_logger.error.assert_called_once_with("server server1 not found for post")
 
 
@@ -757,27 +767,27 @@ def mock_response_fail():
     return return_value
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_mastodon_urls_request_fail(mock_logger, mock_get, mock_response_fail):
-    mock_get.return_value = mock_response_fail
+def test_get_mastodon_urls_request_fail(mock_logger, mock_response_fail):
+    http = Mock()
+    http.get.return_value = mock_response_fail
 
     result = find_posts.get_mastodon_urls(
-        "abc.com", "123456", "https://abc.com/statuses/123456"
-    )
+        "abc.com", "123456", "https://abc.com/statuses/123456",
+        http=http)
 
     assert list(result) == []
     mock_logger.error.assert_called_once()
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_mastodon_urls_exception(mock_logger, mock_get):
-    mock_get.side_effect = Exception("Test exception")
+def test_get_mastodon_urls_exception(mock_logger):
+    http = Mock()
+    http.get.side_effect = Exception("Test exception")
 
     result = find_posts.get_mastodon_urls(
-        "abc.com", "123456", "https://abc.com/statuses/123456"
-    )
+        "abc.com", "123456", "https://abc.com/statuses/123456",
+        http=http)
 
     assert list(result) == []
     mock_logger.error.assert_called_once()
@@ -789,13 +799,14 @@ def test_get_mastodon_urls_exception(mock_logger, mock_get):
 def test_get_lemmy_urls_comment(
     mock_logger, mock_get_lemmy_comments_urls, mock_get_lemmy_comment_context
 ):
+    http = Mock()
     webserver = "webserver"
     toot_id = "toot_id"
     toot_url = "/comment/"
 
-    get_lemmy_urls(webserver, toot_id, toot_url)
+    get_lemmy_urls(webserver, toot_id, toot_url, http=http)
 
-    mock_get_lemmy_comment_context.assert_called_once_with(webserver, toot_id, toot_url)
+    mock_get_lemmy_comment_context.assert_called_once_with(webserver, toot_id, toot_url, http=http)
     mock_logger.error.assert_not_called()
 
 
@@ -805,13 +816,14 @@ def test_get_lemmy_urls_comment(
 def test_get_lemmy_urls_post(
     mock_logger, mock_get_lemmy_comments_urls, mock_get_lemmy_comment_context
 ):
+    http = Mock()
     webserver = "webserver"
     toot_id = "toot_id"
     toot_url = "/post/"
 
-    get_lemmy_urls(webserver, toot_id, toot_url)
+    get_lemmy_urls(webserver, toot_id, toot_url, http=http)
 
-    mock_get_lemmy_comments_urls.assert_called_once_with(webserver, toot_id, toot_url)
+    mock_get_lemmy_comments_urls.assert_called_once_with(webserver, toot_id, toot_url, http=http)
     mock_logger.error.assert_not_called()
 
 
@@ -821,11 +833,12 @@ def test_get_lemmy_urls_post(
 def test_get_lemmy_urls_else(
     mock_logger, mock_get_lemmy_comments_urls, mock_get_lemmy_comment_context
 ):
+    http = Mock()
     webserver = "webserver"
     toot_id = "toot_id"
     toot_url = "/else/"
 
-    result = get_lemmy_urls(webserver, toot_id, toot_url)
+    result = get_lemmy_urls(webserver, toot_id, toot_url, http=http)
 
     assert result == []
     mock_get_lemmy_comments_urls.assert_not_called()
@@ -833,51 +846,52 @@ def test_get_lemmy_urls_else(
     mock_logger.error.assert_called_once_with(f"unknown lemmy url type {toot_url}")
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_lemmy_comment_context_get_fail(mock_logger, mock_get):
-    mock_get.side_effect = Exception
+def test_get_lemmy_comment_context_get_fail(mock_logger):
+    http = Mock()
+    http.get.side_effect = Exception
 
     assert (
-        get_lemmy_comment_context("webserver.com", "test_toot_id", "test_toot_url")
+        get_lemmy_comment_context("webserver.com", "test_toot_id", "test_toot_url", http=http)
         == []
     )
 
-    mock_get.assert_called_once_with(
+    http.get.assert_called_once_with(
         "https://webserver.com/api/v3/comment?id=test_toot_id"
     )
     mock_logger.error.assert_called_once()
 
 
-@patch("find_posts.get")
 @patch("find_posts.logger")
-def test_get_lemmy_comment_context_parse_fail(mock_logger, mock_get):
-    mock_get.return_value.status_code = 200
-    mock_get.return_value.json.return_value = {"invalid_key": "invalid_value"}
+def test_get_lemmy_comment_context_parse_fail(mock_logger):
+    http = Mock()
+    http.get.return_value.status_code = 200
+    http.get.return_value.json.return_value = {"invalid_key": "invalid_value"}
 
     assert (
-        get_lemmy_comment_context("webserver.com", "test_toot_id", "test_toot_url")
+        get_lemmy_comment_context("webserver.com", "test_toot_id", "test_toot_url", http=http)
         == []
     )
 
-    mock_get.assert_called_once_with(
+    http.get.assert_called_once_with(
         "https://webserver.com/api/v3/comment?id=test_toot_id"
     )
     mock_logger.error.assert_called_once()
 
 
 def test_get_peertube_urls_success():
-    with patch("find_posts.get") as mock_get:
+    http = Mock()
+    if True:
         mock_resp = Response()
         mock_resp.status_code = 200
         mock_resp._content = json.dumps(
             {"data": [{"url": "http://example.com/1"}, {"url": "http://example.com/2"}]}
         ).encode("utf-8")
 
-        mock_get.return_value = mock_resp
+        http.get.return_value = mock_resp
 
-        urls = get_peertube_urls("example.com", "123", "http://toot_url.com")
-        mock_get.assert_called_once_with(
+        urls = get_peertube_urls("example.com", "123", "http://toot_url.com", http=http)
+        http.get.assert_called_once_with(
             "https://example.com/api/v1/videos/123/comment-threads"
         )
         assert urls == ["http://example.com/1", "http://example.com/2"]
@@ -885,11 +899,12 @@ def test_get_peertube_urls_success():
 
 @patch("find_posts.logger")
 def test_get_peertube_urls_exception(mock_logger):
-    with patch("find_posts.get") as mock_get:
-        mock_get.side_effect = Exception("Test exception")
+    http = Mock()
+    if True:
+        http.get.side_effect = Exception("Test exception")
 
-        urls = get_peertube_urls("example.com", "123", "http://toot_url.com")
-        mock_get.assert_called_once_with(
+        urls = get_peertube_urls("example.com", "123", "http://toot_url.com", http=http)
+        http.get.assert_called_once_with(
             "https://example.com/api/v1/videos/123/comment-threads"
         )
         mock_logger.error.assert_called_once_with(
@@ -899,14 +914,15 @@ def test_get_peertube_urls_exception(mock_logger):
 
 
 def test_get_misskey_urls_success():
-    with patch("find_posts.post") as mock_post, patch(
+    http = Mock()
+    with patch(
         "find_posts.logger"
     ) as mock_logger:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = [{"id": "123"}, {"id": "456"}]
-        mock_post.return_value = mock_response
-        result = get_misskey_urls("testserver", "1", "testurl")
+        http.post.return_value = mock_response
+        result = get_misskey_urls("testserver", "1", "testurl", http=http)
         expected = [
             "https://testserver/notes/123",
             "https://testserver/notes/456",
@@ -914,59 +930,63 @@ def test_get_misskey_urls_success():
             "https://testserver/notes/456",
         ]
         assert result == expected
-        assert mock_post.call_count == 2
+        assert http.post.call_count == 2
         assert mock_logger.debug.call_count == 2
 
 
 def test_get_misskey_urls_post_error():
-    with patch("find_posts.post") as mock_post, patch(
+    http = Mock()
+    with patch(
         "find_posts.logger"
     ) as mock_logger:
-        mock_post.side_effect = Exception("Error")
-        result = get_misskey_urls("testserver", "1", "testurl")
+        http.post.side_effect = Exception("Error")
+        result = get_misskey_urls("testserver", "1", "testurl", http=http)
         expected = []
         assert result == expected
-        assert mock_post.call_count == 1
+        assert http.post.call_count == 1
         assert mock_logger.error.call_count == 1
 
 
 def test_get_misskey_urls_non_200_response():
-    with patch("find_posts.post") as mock_post, patch(
+    http = Mock()
+    with patch(
         "find_posts.logger"
     ) as mock_logger:
         mock_response = MagicMock()
         mock_response.status_code = 404
-        mock_post.return_value = mock_response
-        result = get_misskey_urls("testserver", "1", "testurl")
+        http.post.return_value = mock_response
+        result = get_misskey_urls("testserver", "1", "testurl", http=http)
         expected = []
         assert result == expected
         assert mock_logger.error.called
 
 
 def test_get_misskey_urls_json_error():
-    with patch("find_posts.post") as mock_post, patch(
+    http = Mock()
+    with patch(
         "find_posts.logger"
     ) as mock_logger:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.side_effect = Exception("JSON Error")
-        mock_post.return_value = mock_response
-        result = get_misskey_urls("testserver", "1", "testurl")
+        http.post.return_value = mock_response
+        result = get_misskey_urls("testserver", "1", "testurl", http=http)
         expected = []
         assert result == expected
-        assert mock_post.call_count == 2
+        assert http.post.call_count == 2
         assert mock_logger.error.call_count == 2
 
 
 @patch("find_posts.add_context_url", return_value=False)
 @patch("find_posts.logger")
 def test_add_context_urls_all_fail(mock_logger, mock_add_context_url):
+    http = Mock()
     server = "test_server"
     access_token = "test_token"
     context_urls = ["url1", "url2", "url3", "url4"]
     seen_urls = set()
 
-    add_context_urls(server, access_token, context_urls, seen_urls)
+    add_context_urls(server, access_token, context_urls, seen_urls, http=http)
 
     assert mock_add_context_url.call_count == 4
     assert len(seen_urls) == 0
@@ -979,12 +999,13 @@ def test_add_context_urls_all_fail(mock_logger, mock_add_context_url):
 @patch("find_posts.add_context_url", return_value=True)
 @patch("find_posts.logger")
 def test_add_context_urls_all_success(mock_logger, mock_add_context_url):
+    http = Mock()
     server = "test_server"
     access_token = "test_token"
     context_urls = ["url1", "url2", "url3", "url4"]
     seen_urls = set()
 
-    add_context_urls(server, access_token, context_urls, seen_urls)
+    add_context_urls(server, access_token, context_urls, seen_urls, http=http)
 
     assert mock_add_context_url.call_count == 4
     assert len(seen_urls) == 4
@@ -1009,186 +1030,40 @@ class MockResponse:
 
 
 def test_add_context_url():
-    with patch("find_posts.get", return_value=MockResponse(200)) as mocked_get:
-        result = find_posts.add_context_url("test-url", "test-server", "test-token")
-        assert result
-        mocked_get.assert_called_once()
-        assert (
-            mocked_get.call_args[0][0]
-            == "https://test-server/api/v2/search?q=test-url&resolve=true&limit=1"
-        )
+    http = Mock()
+    http.get.return_value = MockResponse(200)
 
-    with patch("find_posts.get", return_value=MockResponse(403)) as mocked_get:
-        result = find_posts.add_context_url("test-url", "test-server", "test-token")
-        assert not result
+    assert find_posts.add_context_url("test-url", "test-server", "test-token", http=http)
+
+    http.get.assert_called_once()
+    assert (
+        http.get.call_args[0][0]
+        == "https://test-server/api/v2/search?q=test-url&resolve=true&limit=1"
+    )
+
+    http.get.return_value = MockResponse(403)
+    assert not find_posts.add_context_url("test-url", "test-server", "test-token", http=http)
 
 
 def test_get_paginated_mastodon():
+    http = Mock()
     json_data = [{"created_at": "2022-02-18T05:31:00.000Z"} for _ in range(10)]
-    with patch(
-        "find_posts.get", return_value=MockResponse(200, json_data=json_data)
-    ) as mocked_get:
-        result = find_posts.get_paginated_mastodon("test-url", 10)
-        assert len(result) == 10
-        mocked_get.assert_called_once()
+    http.get.return_value = MockResponse(200, json_data=json_data)
 
-    with patch("find_posts.get", return_value=MockResponse(401)) as mocked_get:
-        with pytest.raises(Exception):
-            find_posts.get_paginated_mastodon("test-url", 10)
-
-    with patch("find_posts.get", return_value=MockResponse(403)) as mocked_get:
-        with pytest.raises(Exception):
-            find_posts.get_paginated_mastodon("test-url", 10)
-
-    with patch("find_posts.get", return_value=MockResponse(500)) as mocked_get:
-        with pytest.raises(Exception):
-            find_posts.get_paginated_mastodon("test-url", 10)
+    assert len(find_posts.get_paginated_mastodon("test-url", 10, http=http)) == 10
+    http.get.assert_called_once()
 
 
-def test_get_cached_robots_cached(monkeypatch):
-    monkeypatch.setattr(
-        find_posts, "ROBOTS_TXT", {"test_url": "test_robots_txt"}, raising=False
-    )
-    assert find_posts.get_cached_robots("test_url") == "test_robots_txt"
-
-
-@patch("find_posts.get_robots_txt_cache_path", return_value="test_cache_path")
-def test_get_cached_robots_no_cache(mock_get_path, monkeypatch):
-    monkeypatch.setattr(find_posts, "ROBOTS_TXT", {}, raising=False)
-    assert find_posts.get_cached_robots("test_url") is None
-
-
-@patch("find_posts.get_cached_robots", return_value="test_robots_txt")
-def test_get_robots_from_url_cached(mock_get_cached_robots):
-    assert find_posts.get_robots_from_url("test_url") == "test_robots_txt"
-
-
-@patch("find_posts.get")
-@patch("find_posts.get_cached_robots", return_value=None)
-def test_get_robots_from_url_exception(mock_get_cached_robots, mock_get, monkeypatch):
-    mock_get.side_effect = Exception
-    monkeypatch.setattr(find_posts, "ROBOTS_TXT", {}, raising=False)
-    assert find_posts.get_robots_from_url("test_url") is True
-    assert find_posts.ROBOTS_TXT["test_url"] is True
-
-
-@patch("find_posts.get_robots_from_url")
-@patch("urllib.robotparser.RobotFileParser")
-def test_can_fetch(mock_robotFileParser, mock_get_robots_from_url, monkeypatch):
-    test_url = "http://test.com"
-    test_user_agent = "test_agent"
-
-    # Prepare mocks
-    mock_robotsTxt = MagicMock()
-    mock_robotParser = MagicMock()
-    monkeypatch.setattr(find_posts, "INSTANCE_BLOCKLIST", [], raising=False)
-
-    # Mock return values
-    mock_get_robots_from_url.return_value = mock_robotsTxt
-    mock_robotFileParser.return_value = mock_robotParser
-
-    mock_robotsTxt.splitlines.return_value = "User-agent: *\nDisallow: /"
-    mock_robotParser.can_fetch.return_value = True
-
-    # Call function
-    result = find_posts.can_fetch(test_user_agent, test_url)
-
-    # Check calls and results
-    mock_get_robots_from_url.assert_called_once_with(
-        "{uri.scheme}://{uri.netloc}/robots.txt".format(uri=parse.urlparse(test_url))
-    )
-    mock_robotParser.parse.assert_called_once_with(mock_robotsTxt.splitlines())
-    mock_robotParser.can_fetch.assert_called_once_with(test_user_agent, test_url)
-    assert result is True
-
-    # Testing when get_robots_from_url return bool type
-    mock_get_robots_from_url.return_value = True
-    result = find_posts.can_fetch(test_user_agent, test_url)
-    assert result is True
-
-
-@pytest.fixture
-def headers():
-    return {"User-Agent": "test-agent"}
-
-
-@pytest.fixture
-def url():
-    return "http://test.com"
-
-
-@patch("find_posts.requests")
-def test_robots_txt_prohibited(mock_requests, headers, url):
-    with patch("find_posts.can_fetch") as mock_can_fetch:
-        mock_can_fetch.return_value = False
-        with pytest.raises(Exception) as exc_info:
-            get(url, headers)
-
-        assert "prohibited by robots.txt" in str(exc_info.value)
-        mock_can_fetch.assert_called_once_with(headers["User-Agent"], url)
-
-
-@patch("find_posts.requests")
-@patch("find_posts.can_fetch")
-@patch("find_posts.user_agent")
-@patch("find_posts.logger")
-def test_post_success(mock_logger, mock_user_agent, mock_can_fetch, mock_requests):
-    url = "http://testurl.com"
-    mock_json = {"key": "value"}
-    headers = {"User-Agent": "test_agent"}
-    timeout = 2
-    mock_user_agent.return_value = "test_agent"
-    mock_can_fetch.return_value = True
-    mock_requests.post.return_value.status_code = 200
-
-    post(url, mock_json, headers, timeout)
-
-    mock_requests.post.assert_called_once_with(
-        url, json=mock_json, headers=headers, timeout=timeout
-    )
-
-
-@patch("find_posts.requests")
-@patch("find_posts.can_fetch")
-@patch("find_posts.user_agent")
-@patch("find_posts.logger")
-def test_post_rate_limit(mock_logger, mock_user_agent, mock_can_fetch, mock_requests):
-    url = "http://testurl.com"
-    mock_json = {"key": "value"}
-    headers = {"User-Agent": "test_agent"}
-    timeout = 2
-    mock_user_agent.return_value = "test_agent"
-    mock_can_fetch.return_value = True
-    response = Mock()
-    response.status_code = 429
-    response.headers = {"x-ratelimit-reset": "1900-01-01 01:00:00"}
-    mock_requests.post.return_value = response
-
+@pytest.mark.parametrize("status", [401, 403, 500])
+def test_get_paginated_mastodon_error_status(status):
+    http = Mock()
+    http.get.return_value = MockResponse(status)
     with pytest.raises(Exception):
-        post(url, mock_json, headers, timeout)
-
-
-@patch("find_posts.requests")
-@patch("find_posts.can_fetch")
-@patch("find_posts.user_agent")
-@patch("find_posts.logger")
-def test_post_robotstxt_disallowed(
-    mock_logger, mock_user_agent, mock_can_fetch, mock_requests
-):
-    url = "http://testurl.com"
-    mock_json = {"key": "value"}
-    headers = {}
-    mock_user_agent.return_value = "test_agent"
-    mock_can_fetch.return_value = False
-
-    with pytest.raises(Exception):
-        post(url, mock_json, headers)
-
-
-@patch("find_posts.get", autospec=True)
+        find_posts.get_paginated_mastodon("test-url", 10, http=http)
 @patch("find_posts.ET.fromstring", autospec=True)
 @patch("find_posts.logger", autospec=True)
-def test_get_server_from_host_meta(mock_logger, mock_parse, mock_get):
+def test_get_server_from_host_meta(mock_logger, mock_parse):
+    http = Mock()
     server = "dummy-server"
     result = "result"
 
@@ -1196,69 +1071,73 @@ def test_get_server_from_host_meta(mock_logger, mock_parse, mock_get):
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.text = "<dummy>dummy text</dummy>"
-    mock_get.return_value = mock_response
+    http.get.return_value = mock_response
     mock_parse.return_value.find.return_value.get.return_value = f"https://{result}/"
-    assert find_posts.get_server_from_host_meta(server) == result
-    mock_get.assert_called_once_with(
+    assert find_posts.get_server_from_host_meta(server, http=http) == result
+    http.get.assert_called_once_with(
         f"https://{server}/.well-known/host-meta", timeout=30
     )
     mock_parse.assert_called_once_with(mock_response.text)
     mock_logger.error.assert_not_called()
 
     # Case when get(url) call throws an Exception
-    mock_get.side_effect = Exception("mocked exception")
-    assert find_posts.get_server_from_host_meta(server) is None
+    http.get.side_effect = Exception("mocked exception")
+    assert find_posts.get_server_from_host_meta(server, http=http) is None
     mock_logger.error.assert_called_once()
 
     # Case when status code is not 200
     mock_response.status_code = 404
-    mock_get.side_effect = None
-    assert find_posts.get_server_from_host_meta(server) is None
+    http.get.side_effect = None
+    assert find_posts.get_server_from_host_meta(server, http=http) is None
     mock_logger.error.assert_called()
 
     # Case when parsing fails
     mock_response.status_code = 200
     mock_parse.side_effect = Exception("mocked exception")
-    assert find_posts.get_server_from_host_meta(server) is None
+    assert find_posts.get_server_from_host_meta(server, http=http) is None
     mock_logger.error.assert_called()
 
     # Case when matching fails
     mock_parse.side_effect = None
     mock_parse.return_value.find.return_value.get.return_value = "malformed url"
-    assert find_posts.get_server_from_host_meta(server) is None
+    assert find_posts.get_server_from_host_meta(server, http=http) is None
     mock_logger.error.assert_called()
 
 
-@patch("find_posts.get", side_effect=Exception("Mock Exception"))
 @patch("find_posts.logger")
-def test_get_nodeinfo_get_exception(mock_logger, mock_get):
-    response = find_posts.get_nodeinfo("test_server", {})
+def test_get_nodeinfo_get_exception(mock_logger):
+    http = Mock()
+    http.get.side_effect = Exception("Mock Exception")
+    response = find_posts.get_nodeinfo("test_server", {}, http=http)
     mock_logger.error.assert_called()
     assert response is None
 
 
-@patch("find_posts.get", return_value=Mock(status_code=404))
 @patch("find_posts.get_server_from_host_meta", return_value="new_server")
 @patch("find_posts.logger")
-def test_get_nodeinfo_404_status_no_fallback(mock_logger, mock_get_server, mock_get):
-    response = find_posts.get_nodeinfo("test_server", {})
+def test_get_nodeinfo_404_status_no_fallback(mock_logger, mock_get_server):
+    http = Mock()
+    http.get.return_value = Mock(status_code=404)
+    response = find_posts.get_nodeinfo("test_server", {}, http=http)
     mock_logger.debug.assert_called()
     assert response is None
 
 
-@patch("find_posts.get", return_value=Mock(status_code=200))
 @patch("find_posts.logger")
-def test_get_nodeinfo_200_status_no_links(mock_logger, mock_get):
-    mock_get.return_value.json.return_value = {"links": []}
-    response = find_posts.get_nodeinfo("test_server", {})
+def test_get_nodeinfo_200_status_no_links(mock_logger):
+    http = Mock()
+    http.get.return_value = Mock(status_code=200)
+    http.get.return_value.json.return_value = {"links": []}
+    response = find_posts.get_nodeinfo("test_server", {}, http=http)
     mock_logger.error.assert_called()
     assert response is None
 
 
-@patch("find_posts.get", return_value=Mock(status_code=404))
 @patch("find_posts.logger")
-def test_get_nodeinfo_404_status(mock_logger, mock_get):
-    mock_get.return_value.json.return_value = {
+def test_get_nodeinfo_404_status(mock_logger):
+    http = Mock()
+    http.get.return_value = Mock(status_code=404)
+    http.get.return_value.json.return_value = {
         "links": [
             {
                 "rel": "http://nodeinfo.diaspora.software/ns/schema/2.0",
@@ -1266,7 +1145,7 @@ def test_get_nodeinfo_404_status(mock_logger, mock_get):
             }
         ]
     }
-    response = find_posts.get_nodeinfo("test_server", {})
+    response = find_posts.get_nodeinfo("test_server", {}, http=http)
     mock_logger.error.assert_called()
     assert response is None
 
@@ -1330,6 +1209,7 @@ def test_set_server_apis_with_unknown_software():
 
 @patch("find_posts.get_paginated_mastodon")
 def test_get_user_lists(mock_get_paginated_mastodon):
+    http = Mock()
     mock_get_paginated_mastodon.return_value = "Test value"
 
     server = "test-server"
@@ -1338,11 +1218,11 @@ def test_get_user_lists(mock_get_paginated_mastodon):
     expected_limit = 99
     expected_headers = {"Authorization": f"Bearer {token}"}
 
-    result = find_posts.get_user_lists(server, token)
+    result = find_posts.get_user_lists(server, token, http=http)
 
     mock_get_paginated_mastodon.assert_called_once_with(
-        expected_url, expected_limit, expected_headers
-    )
+        expected_url, expected_limit, expected_headers,
+        http=http)
 
     assert result == "Test value"
 
@@ -1350,6 +1230,7 @@ def test_get_user_lists(mock_get_paginated_mastodon):
 @patch("find_posts.get_paginated_mastodon")
 @patch("find_posts.logger")
 def test_get_list_timeline(mock_logger, mock_get_paginated_mastodon):
+    http = Mock()
     # Arrange
     server = "mastodon.social"
     list_info = {"id": 123, "title": "test_list"}
@@ -1358,7 +1239,7 @@ def test_get_list_timeline(mock_logger, mock_get_paginated_mastodon):
     mock_get_paginated_mastodon.return_value = ["post1", "post2"]
 
     # Act
-    result = get_list_timeline(server, list_info, token, max)
+    result = get_list_timeline(server, list_info, token, max, http=http)
 
     # Assert
     mock_get_paginated_mastodon.assert_called_once_with(
@@ -1367,7 +1248,7 @@ def test_get_list_timeline(mock_logger, mock_get_paginated_mastodon):
         {
             "Authorization": f"Bearer {token}",
         },
-    )
+        http=http)
     mock_logger.info.assert_called_once_with(
         f"Found {len(mock_get_paginated_mastodon.return_value)} toots in list {list_info['title']}"
     )
@@ -1378,6 +1259,7 @@ def test_get_list_timeline(mock_logger, mock_get_paginated_mastodon):
 @patch("find_posts.get_paginated_mastodon")
 @patch("find_posts.logger")
 def test_get_list_users(mock_logger, mock_get_paginated_mastodon):
+    http = Mock()
     # define mock values
     mock_server = "mock_server"
     mock_list = {"id": "mock_id", "title": "mock_title"}
@@ -1392,12 +1274,12 @@ def test_get_list_users(mock_logger, mock_get_paginated_mastodon):
     mock_get_paginated_mastodon.return_value = mock_accounts
 
     # Call the function with the mock values
-    result = get_list_users(mock_server, mock_list, mock_token, mock_max)
+    result = get_list_users(mock_server, mock_list, mock_token, mock_max, http=http)
 
     # Assert the function called get_paginated_mastodon with correct arguments
     mock_get_paginated_mastodon.assert_called_once_with(
-        expected_url, mock_max, {"Authorization": f"Bearer {mock_token}"}
-    )
+        expected_url, mock_max, {"Authorization": f"Bearer {mock_token}"},
+        http=http)
 
     # Assert the function called logger.info with correct arguments
     mock_logger.info.assert_called_once_with(
@@ -1417,16 +1299,15 @@ def test_fetch_timeline_context_with_empty_posts(
     mock_add_user_posts,
     mock_add_context_urls,
     mock_get_all_known_context_urls,
-    monkeypatch,
 ):
     # Arrange
+    http = Mock()
+    config = SimpleNamespace(server="server_test", backfill_mentioned_users=False)
     timeline_posts = []
     token, parsed_urls, seen_hosts = "", [], []
     seen_urls, all_known_users, recently_checked_users = [], [], []
-    arguments = SimpleNamespace(server="server_test", backfill_mentioned_users=0)
 
     # Act
-    monkeypatch.setattr(find_posts, "arguments", arguments, raising=False)
     find_posts.fetch_timeline_context(
         timeline_posts,
         token,
@@ -1435,14 +1316,14 @@ def test_fetch_timeline_context_with_empty_posts(
         seen_urls,
         all_known_users,
         recently_checked_users,
-    )
+        http=http, config=config)
 
     # Assert
     mock_get_all_known_context_urls.assert_called_once_with(
-        arguments.server, timeline_posts, parsed_urls, seen_hosts
-    )
+        config.server, timeline_posts, parsed_urls, seen_hosts,
+        http=http)
     mock_add_context_urls.assert_called_once_with(
-        arguments.server, token, mock_get_all_known_context_urls.return_value, seen_urls
-    )
+        config.server, token, mock_get_all_known_context_urls.return_value, seen_urls,
+        http=http)
     assert not mock_filter_known_users.called
     assert not mock_add_user_posts.called
