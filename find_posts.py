@@ -10,12 +10,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import NoReturn
 
-import defusedxml.ElementTree as ET
 from dateutil import parser
 
 from fedifetcher import VERSION
 from fedifetcher.config import Config, ConfigError
 from fedifetcher.http import HttpClient, build_callback_url
+from fedifetcher.servers import ApiFlavour, get_server_info
 from fedifetcher.state import ServerCache, TimestampedSet
 from fedifetcher.urls import (
     parse_url,
@@ -121,19 +121,19 @@ def get_user_posts(user, known_followings, server, seen_hosts, *, http):
         logger.error(f'server {parsed_url[0]} not found for post')
         return None
 
-    if post_server['mastodonApiSupport']:
-        return get_user_posts_mastodon(parsed_url[1], post_server['webserver'], http=http)
+    if post_server.supports(ApiFlavour.MASTODON):
+        return get_user_posts_mastodon(parsed_url[1], post_server.webserver, http=http)
 
-    if post_server['lemmyApiSupport']:
-        return get_user_posts_lemmy(parsed_url[1], user['url'], post_server['webserver'], http=http)
+    if post_server.supports(ApiFlavour.LEMMY):
+        return get_user_posts_lemmy(parsed_url[1], user['url'], post_server.webserver, http=http)
 
-    if post_server['misskeyApiSupport']:
-        return get_user_posts_misskey(parsed_url[1], post_server['webserver'], http=http)
+    if post_server.supports(ApiFlavour.MISSKEY):
+        return get_user_posts_misskey(parsed_url[1], post_server.webserver, http=http)
 
-    if post_server['peertubeApiSupport']:
-        return get_user_posts_peertube(parsed_url[1], post_server['webserver'], http=http)
+    if post_server.supports(ApiFlavour.PEERTUBE):
+        return get_user_posts_peertube(parsed_url[1], post_server.webserver, http=http)
 
-    logger.error(f'server api unknown for {post_server["webserver"]}, cannot fetch user posts')
+    logger.error(f'server api unknown for {post_server.webserver}, cannot fetch user posts')
     return None
 
 def get_user_posts_mastodon(userName, webserver, *, http):
@@ -584,14 +584,14 @@ def get_toot_context(server, toot_id, toot_url, seen_hosts, *, http):
         logger.error(f'server {server} not found for post')
         return []
 
-    if post_server['mastodonApiSupport']:
-        return get_mastodon_urls(post_server['webserver'], toot_id, toot_url, http=http)
-    if post_server['lemmyApiSupport']:
-        return get_lemmy_urls(post_server['webserver'], toot_id, toot_url, http=http)
-    if post_server['misskeyApiSupport']:
-        return get_misskey_urls(post_server['webserver'], toot_id, toot_url, http=http)
-    if post_server['peertubeApiSupport']:
-        return get_peertube_urls(post_server['webserver'], toot_id, toot_url, http=http)
+    if post_server.supports(ApiFlavour.MASTODON):
+        return get_mastodon_urls(post_server.webserver, toot_id, toot_url, http=http)
+    if post_server.supports(ApiFlavour.LEMMY):
+        return get_lemmy_urls(post_server.webserver, toot_id, toot_url, http=http)
+    if post_server.supports(ApiFlavour.MISSKEY):
+        return get_misskey_urls(post_server.webserver, toot_id, toot_url, http=http)
+    if post_server.supports(ApiFlavour.PEERTUBE):
+        return get_peertube_urls(post_server.webserver, toot_id, toot_url, http=http)
 
     logger.error(f'unknown server api for {server}')
     return []
@@ -836,159 +836,6 @@ def get_paginated_mastodon(url, max, headers = None, timeout = None, max_tries =
             else:
                 break
     return result
-
-def get_server_from_host_meta(server, *, http):
-    url = f'https://{server}/.well-known/host-meta'
-    try:
-        resp = http.get(url, timeout = 30)
-    except Exception as ex:
-        logger.error(f"Error getting host meta for {server}. Exception: {ex}")
-        return None
-
-    if resp.status_code == 200:
-        try:
-            hostMeta = ET.fromstring(resp.text)
-            lrdd = hostMeta.find('.//{http://docs.oasis-open.org/ns/xri/xrd-1.0}Link[@rel="lrdd"]')
-            url = lrdd.get('template')
-            match = re.match(
-                r"https://(?P<server>[^/]+)/", url
-            )
-            if match is None:
-                raise Exception(f'server not found in lrdd for {server}')
-            return match.group("server")
-        except Exception as ex:
-            logger.error(f'Error parsing host meta for {server}. Exception: {ex}')
-            return None
-    else:
-        logger.error(f'Error getting host meta for {server}. Status Code: {resp.status_code}')
-        return None
-
-def get_nodeinfo(server, seen_hosts, host_meta_fallback = False, *, http):
-    url = f'https://{server}/.well-known/nodeinfo'
-    try:
-        resp = http.get(url, timeout = 30)
-    except Exception as ex:
-        logger.error(f"Error getting host node info for {server}. Exception: {ex}")
-        return None
-
-    # if well-known nodeinfo isn't found, try to check host-meta for a webfinger URL
-    # needed on servers where the display domain is different than the web domain
-    if resp.status_code != 200 and not host_meta_fallback:
-        # not found, try to check host-meta as a fallback
-        logger.debug(f'nodeinfo for {server} not found, checking host-meta')
-        new_server = get_server_from_host_meta(server, http=http)
-        if new_server is not None:
-            if new_server == server:
-                logger.debug(f'host-meta for {server} did not get a new server.')
-                return None
-            else:
-                return get_nodeinfo(new_server, seen_hosts, True, http=http)
-        else:
-            return None
-
-    if resp.status_code == 200:
-        nodeLoc = None
-        try:
-            nodeInfo = resp.json()
-            for link in nodeInfo['links']:
-                if link['rel'] in [
-                    'http://nodeinfo.diaspora.software/ns/schema/2.0',
-                    'http://nodeinfo.diaspora.software/ns/schema/2.1',
-                ]:
-                    nodeLoc = link['href']
-                    break
-        except Exception as ex:
-            logger.error(f'error getting server {server} info from well-known node info. Exception: {ex}')
-            return None
-    else:
-        logger.error(f'Error getting well-known host node info for {server}. Status Code: {resp.status_code}')
-        return None
-
-    if nodeLoc is None:
-        logger.error(f'could not find link to node info in well-known nodeinfo of {server}')
-        return None
-
-    # regrab server from nodeLoc, again in the case of different display and web domains
-    match = re.match(
-        r"https://(?P<server>[^/]+)/", nodeLoc
-    )
-    if match is None:
-        logger.error(f"Error getting web server name from {server}.")
-        return None
-
-    server = match.group('server')
-
-    # return early if the web domain has been seen previously (in cases with host-meta lookups)
-    if server in seen_hosts:
-        return seen_hosts.get(server)
-
-    try:
-        resp = http.get(nodeLoc, timeout = 30)
-    except Exception as ex:
-        logger.error(f"Error getting host node info for {server}. Exception: {ex}")
-        return None
-
-    if resp.status_code == 200:
-        try:
-            nodeInfo = resp.json()
-            if 'activitypub' not in nodeInfo['protocols']:
-                logger.warning(f'server {server} does not support activitypub, skipping')
-                return None
-            return {
-                'webserver': server,
-                'software': nodeInfo['software']['name'],
-                'version': nodeInfo['software']['version'],
-                'rawnodeinfo': nodeInfo,
-            }
-        except Exception as ex:
-            logger.error(f'error getting server {server} info from nodeinfo. Exception: {ex}')
-            return None
-    else:
-        logger.error(f'Error getting host node info for {server}. Status Code: {resp.status_code}')
-        return None
-
-def get_server_info(server, seen_hosts, *, http):
-    if server in seen_hosts:
-        serverInfo = seen_hosts.get(server)
-        if('info' in serverInfo and serverInfo['info'] is None):
-            return None
-        return serverInfo
-
-    nodeinfo = get_nodeinfo(server, seen_hosts, http=http)
-    if nodeinfo is None:
-        seen_hosts.add(server, {
-            'info': None,
-            'last_checked': datetime.now()
-        })
-    else:
-        set_server_apis(nodeinfo)
-        seen_hosts.add(server, nodeinfo)
-        if server is not nodeinfo['webserver']:
-            seen_hosts.add(nodeinfo['webserver'], nodeinfo)
-    return nodeinfo
-
-def set_server_apis(server):
-    # support for new server software should be added here
-    software_apis = {
-        'mastodonApiSupport': ['mastodon', 'pleroma', 'akkoma', 'pixelfed', 'hometown', 'iceshrimp', 'Iceshrimp.NET'],
-        'misskeyApiSupport': ['misskey', 'calckey', 'firefish', 'foundkey', 'sharkey'],
-        'lemmyApiSupport': ['lemmy'],
-        'peertubeApiSupport': ['peertube']
-    }
-
-    # software that has specific API support but is not compatible with FediFetcher for various reasons:
-    # * gotosocial - All Mastodon APIs require access token (https://github.com/superseriousbusiness/gotosocial/issues/2038)
-
-    for api, softwareList in software_apis.items():
-        server[api] = server['software'] in softwareList
-
-    # search `features` list in metadata if available
-    if 'metadata' in server['rawnodeinfo'] and 'features' in server['rawnodeinfo']['metadata'] and type(server['rawnodeinfo']['metadata']['features']) is list:
-        features = server['rawnodeinfo']['metadata']['features']
-        if 'mastodon_api' in features:
-            server['mastodonApiSupport'] = True
-
-    server['last_checked'] = datetime.now()
 
 def get_user_lists(server, token, *, http):
     return get_paginated_mastodon(f"https://{server}/api/v1/lists", 99, {
