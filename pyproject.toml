@@ -26,4 +26,4 @@ source = ["fedifetcher"]
 
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]
-fail_under = 85
+fail_under = 94
