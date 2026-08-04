@@ -220,3 +220,134 @@ def test_add_context_urls_skips_urls_we_already_have(state, home):
     add_context_urls(home, ["url1", "url2"], state=state)
 
     home.resolve.assert_called_once_with("url2")
+
+
+def public_toot(uri="https://remote.example/@a/1", **extra):
+    return {
+        "url": "https://remote.example/@a/1",
+        "uri": uri,
+        "reblog": None,
+        "visibility": "public",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        **extra,
+    }
+
+
+def test_a_failed_context_lookup_is_reported(state, http, caplog):
+    with patch.object(context, "toot_has_parseable_url", return_value=True), \
+         patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+         patch.object(context, "get_toot_context", return_value=None):
+        urls = context.get_all_known_context_urls(
+            "our.example", [public_toot()], http=http, state=state
+        )
+
+    assert urls == set()
+    assert "Error getting context for toot" in caplog.text
+
+
+def test_posts_already_on_our_own_server_are_not_returned(state, http):
+    ours = "https://our.example/@a/2"
+    theirs = "https://remote.example/@b/3"
+
+    with patch.object(context, "toot_has_parseable_url", return_value=True), \
+         patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+         patch.object(context, "get_toot_context", return_value=[ours, theirs]):
+        urls = context.get_all_known_context_urls(
+            "our.example", [public_toot()], http=http, state=state
+        )
+
+    assert urls == {theirs}
+
+
+def test_private_posts_are_not_asked_about(state, http):
+    private = public_toot(visibility="private")
+
+    with patch.object(context, "toot_has_parseable_url", return_value=True), \
+         patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+         patch.object(context, "get_toot_context") as fetch:
+        context.get_all_known_context_urls(
+            "our.example", [private], http=http, state=state
+        )
+
+    fetch.assert_not_called()
+
+
+def test_posts_we_cannot_parse_are_skipped(state, http):
+    with patch.object(context, "toot_has_parseable_url", return_value=False), \
+         patch.object(context, "get_toot_context") as fetch:
+        context.get_all_known_context_urls(
+            "our.example", [public_toot()], http=http, state=state
+        )
+
+    fetch.assert_not_called()
+
+
+def test_a_reblog_is_followed_to_the_post_it_boosts(state, http):
+    reblog = public_toot(reblog={"url": "https://remote.example/@original/9"})
+
+    with patch.object(context, "parse_url", return_value=("remote.example", "9")) as parse:
+        assert context.toot_has_parseable_url(reblog, http=http, state=state)
+
+    assert parse.call_args[0][0] == "https://remote.example/@original/9"
+
+
+def test_replied_toot_ids_drop_the_ones_that_could_not_be_worked_out(state, http):
+    with patch.object(context, "get_replied_toot_server_id", side_effect=[None, ("url", ("s", "1"))]):
+        result = list(context.get_all_replied_toot_server_ids(
+            "our.example", [public_toot(), public_toot()], http=http, state=state
+        ))
+
+    assert result == [("url", ("s", "1"))]
+
+
+def test_an_unparseable_redirect_is_remembered_as_a_dead_end(state, http, caplog):
+    toot = {
+        "in_reply_to_id": "1",
+        "in_reply_to_account_id": "1",
+        "mentions": [{"id": "1", "acct": "account"}],
+    }
+    http.get_redirect_url.return_value = "https://elsewhere/nonsense"
+
+    with patch.object(context, "parse_url", return_value=None):
+        result = context.get_replied_toot_server_id(
+            "our.example", toot, http=http, state=state
+        )
+
+    assert result is None
+    assert "Error parsing toot URL" in caplog.text
+    # remembered so the same redirect is not chased again
+    assert state.replied_toot_server_ids["https://our.example/@account/1"] is None
+
+
+def test_context_urls_skip_posts_we_already_host(state, http):
+    replied = [("https://remote.example/@a/1", ("remote.example", "1"))]
+
+    with patch.object(context, "get_toot_context",
+                      return_value=["https://our.example/@x/1", "https://remote.example/@y/2"]):
+        urls = list(context.get_all_context_urls(
+            "our.example", replied, http=http, state=state
+        ))
+
+    assert urls == ["https://remote.example/@y/2"]
+
+
+def test_toot_context_comes_from_the_client_for_that_server(state, http):
+    client = Mock()
+    client.fetch_context_urls.return_value = ["https://remote.example/@a/2"]
+
+    with patch.object(context, "get_server_info", return_value=Mock()), \
+         patch.object(context, "client_for", return_value=client):
+        urls = context.get_toot_context(
+            "remote.example", "1", "https://remote.example/@a/1", http=http, state=state
+        )
+
+    assert urls == ["https://remote.example/@a/2"]
+    client.fetch_context_urls.assert_called_once_with("1", "https://remote.example/@a/1")
+
+
+def test_a_server_we_cannot_talk_to_yields_no_context(state, http):
+    with patch.object(context, "get_server_info", return_value=Mock()), \
+         patch.object(context, "client_for", return_value=None):
+        assert context.get_toot_context(
+            "remote.example", "1", "url", http=http, state=state
+        ) == []
