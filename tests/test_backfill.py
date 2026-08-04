@@ -11,6 +11,7 @@ from fedifetcher.backfill import (
     user_has_opted_out,
 )
 from fedifetcher.state import TimestampedSet
+from fedifetcher.store import State
 
 
 @patch("fedifetcher.backfill.get_user_posts")
@@ -297,7 +298,7 @@ def test_a_post_whose_url_we_cannot_parse_is_still_added(state, home, http):
     gather.assert_not_called()
 
 
-def test_a_user_is_only_marked_known_when_every_post_succeeded(state, home, http, caplog):
+def test_partial_failures_are_counted_and_reported(state, home, http, caplog):
     caplog.set_level(logging.INFO)
     config = Mock()
     target = TimestampedSet()
@@ -311,7 +312,6 @@ def test_a_user_is_only_marked_known_when_every_post_succeeded(state, home, http
 
     assert "Added 1 posts for user someone@remote.example with 1 errors" in caplog.text
     assert "someone@remote.example" not in target
-    assert "someone@remote.example" not in state.all_known_users
 
 
 def test_reblogs_and_renotes_are_not_added(state, home, http):
@@ -349,3 +349,53 @@ def test_users_on_our_own_server_are_skipped(state, home, http):
         )
 
     fetch.assert_not_called()
+
+
+def test_an_account_whose_posts_all_worked_is_done():
+    """Recorded in the caller's collection, which for followings never expires"""
+    state, home, http = State(), Mock(), Mock()
+    home.server = "our.example"
+    target = TimestampedSet()
+
+    with patch.object(backfill, "get_user_posts", return_value=[{"url": "u1"}]), \
+         patch.object(backfill, "add_post_with_context", return_value=True):
+        backfill.add_user_posts(
+            home, [account()], target, http=http, config=Mock(), state=state
+        )
+
+    assert "someone@remote.example" in target
+    assert "someone@remote.example" not in state.recently_checked_users
+
+
+def test_an_account_with_a_failure_is_retried_later_not_every_run():
+    """A permanently unfetchable post must not mean re-fetching the account for ever"""
+    state, home, http = State(), Mock(), Mock()
+    home.server = "our.example"
+    target = TimestampedSet()
+
+    with patch.object(backfill, "get_user_posts", return_value=[{"url": "u1"}]), \
+         patch.object(backfill, "add_post_with_context", return_value=False):
+        backfill.add_user_posts(
+            home, [account()], target, http=http, config=Mock(), state=state
+        )
+
+    # not done, so it is not recorded as such...
+    assert "someone@remote.example" not in target
+    # ...but it is remembered, so the next run skips it until this entry expires
+    assert "someone@remote.example" in state.recently_checked_users
+    assert "someone@remote.example" in state.all_known_users
+
+
+def test_a_retried_account_that_succeeds_is_finally_done():
+    state, home, http = State(), Mock(), Mock()
+    home.server = "our.example"
+    target = TimestampedSet()
+    state.recently_checked_users.add("someone@remote.example")
+
+    with patch.object(backfill, "get_user_posts", return_value=[{"url": "u1"}]), \
+         patch.object(backfill, "add_post_with_context", return_value=True):
+        backfill.add_user_posts(
+            home, [account()], target, http=http, config=Mock(), state=state
+        )
+
+    assert "someone@remote.example" in target

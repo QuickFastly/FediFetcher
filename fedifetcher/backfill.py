@@ -86,4 +86,9 @@ def add_user_posts(home, followings, target, *, http, config, state):
                 logger.info(f"Added {count} posts for user {user['acct']} with {failed} errors")
                 if failed == 0:
                     target.add(user['acct'])
-                    state.all_known_users.add(user['acct'])
+                else:
+                    # Some posts could not be fetched, so the account isn't done: record
+                    # it among the users we expire, so that we try again after a while
+                    # rather than on every single run.
+                    state.recently_checked_users.add(user['acct'])
+                state.all_known_users.add(user['acct'])
