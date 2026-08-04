@@ -20,7 +20,11 @@ jobs:
           VERSION=${{ github.ref_name }}
           VERSION="${VERSION:1}"
           if ! grep "VERSION = \"$VERSION\"" "fedifetcher/__init__.py"; then
-            sed -i -E 's/VERSION = "[0-9]+.[0-9]+.[0-9]+"/VERSION = "'$VERSION'"/' fedifetcher/__init__.py
+            sed -i -E 's/^VERSION = ".*"$/VERSION = "'"$VERSION"'"/' fedifetcher/__init__.py
+            if ! grep -q "VERSION = \"$VERSION\"" fedifetcher/__init__.py; then
+              echo "::error::Could not set version to $VERSION in fedifetcher/__init__.py"
+              exit 1
+            fi
             git add fedifetcher/__init__.py
             git commit -m "[bot] Bump version to $VERSION"
             git push origin HEAD:main > /dev/null 2>&1
