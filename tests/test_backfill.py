@@ -4,6 +4,7 @@ from fedifetcher import backfill
 from fedifetcher.backfill import (
     add_user_posts,
     filter_known_users,
+    user_has_opted_out,
 )
 from fedifetcher.state import TimestampedSet
 
@@ -80,6 +81,14 @@ def test_add_post_with_context_post_not_added(state, home, http):
 
     home.resolve.assert_called_once_with(post["url"])
     assert result is False
+
+
+def test_user_has_opted_out():
+    assert not user_has_opted_out({"note": "I love robots"})
+    assert user_has_opted_out({"note": "I love robots, nobot"})
+    assert user_has_opted_out({"note": "/tags/nobot"})
+    assert user_has_opted_out({"indexable": False})
+    assert user_has_opted_out({"discoverable": False})
 
 
 def test_filter_known_users():

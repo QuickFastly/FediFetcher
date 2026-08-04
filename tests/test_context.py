@@ -1,10 +1,11 @@
+import logging
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 from fedifetcher import context
-from fedifetcher.context import get_toot_context
+from fedifetcher.context import add_context_urls, get_toot_context
 
 
 @pytest.fixture
@@ -187,3 +188,35 @@ class MockResponse:
 
     def json(self):
         return self.json_data
+
+
+def test_add_context_urls_records_what_the_server_accepted(state, home, caplog):
+    caplog.set_level(logging.INFO)
+    home.resolve.return_value = True
+
+    add_context_urls(home, ["url1", "url2", "url3", "url4"], state=state)
+
+    assert home.resolve.call_count == 4
+    assert len(state.seen_urls) == 4
+    assert "url1" in state.seen_urls
+    assert "Added 4 new context toots (with 0 failures)" in caplog.text
+
+
+def test_add_context_urls_counts_what_the_server_refused(state, home, caplog):
+    caplog.set_level(logging.INFO)
+    home.resolve.return_value = False
+
+    add_context_urls(home, ["url1", "url2", "url3", "url4"], state=state)
+
+    assert home.resolve.call_count == 4
+    assert len(state.seen_urls) == 0
+    assert "Added 0 new context toots (with 4 failures)" in caplog.text
+
+
+def test_add_context_urls_skips_urls_we_already_have(state, home):
+    state.seen_urls.add("url1")
+    home.resolve.return_value = True
+
+    add_context_urls(home, ["url1", "url2"], state=state)
+
+    home.resolve.assert_called_once_with("url2")
