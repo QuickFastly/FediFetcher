@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 
 from dateutil import parser
 
@@ -41,7 +41,7 @@ class MastodonApi:
         response = self._http.get(url, headers=headers)
 
         if response.status_code == 200:
-            return response.json()['id']
+            return cast("str", response.json()['id'])
         elif response.status_code == 404:
             raise Exception(
                 f"User {user} was not found on server {self.webserver}."
@@ -65,7 +65,7 @@ class MastodonApi:
             response = self._http.get(url)
 
             if(response.status_code == 200):
-                return response.json()
+                return cast("list[dict[str, Any]]", response.json())
             elif response.status_code == 404:
                 raise Exception(
                     f"User {username} was not found on server {self.webserver}"
@@ -141,7 +141,7 @@ def get_paginated(
             headers.get('Authorization', '').replace("Bearer ", ""),
         )
 
-    result = response.json()
+    result: list[Any] = response.json()
 
     while _wants_more(result, stop_at) and 'next' in response.links:
         response = http.get(response.links['next']['url'], headers, timeout, max_tries)
@@ -224,7 +224,7 @@ class HomeServer:
         url = f"https://{self.server}/api/v1/timelines/home"
         try:
             response = self._toots(url)
-            toots = response.json()
+            toots: list[Any] = response.json()
 
             # Paginate as needed
             while len(toots) < limit and 'next' in response.links:
@@ -274,7 +274,7 @@ class HomeServer:
                 f"Error getting replies for user {user_id} on server {self.server}",
                 resp.status_code, self._token, "read:statuses",
             )
-        return resp.json()
+        return cast("list[Any]", resp.json())
 
     def resolve(self, url: str) -> bool:
         """Ask our server to fetch a remote post, so it appears locally"""

@@ -1,5 +1,6 @@
 import logging
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -10,7 +11,13 @@ from fedifetcher.backfill import (
     filter_known_users,
     user_has_opted_out,
 )
+from fedifetcher.config import Config
 from fedifetcher.state import TimestampedSet
+
+
+def config_with(**settings: Any) -> Config:
+    """A Config stand-in carrying only the settings a test cares about"""
+    return cast("Config", SimpleNamespace(**settings))
 
 
 @patch("fedifetcher.backfill.get_user_posts")
@@ -114,7 +121,7 @@ def test_filter_known_users_no_known_users():
         {"acct": "user2"},
         {"acct": "user3"},
     ]
-    known_users = []
+    known_users: list[str] = []
 
     filtered_users = filter_known_users(users, known_users)
 
@@ -135,7 +142,7 @@ def test_filter_known_users_all_users_known():
 
 
 def test_filter_known_users_no_users():
-    users = []
+    users: list[dict[str, str]] = []
     known_users = ["user1", "user2", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
@@ -235,7 +242,7 @@ def test_posts_come_from_the_client_for_that_server(state, http):
 
 def test_a_post_the_server_refuses_is_reported_as_not_added(state, home, http):
     home.resolve.return_value = False
-    config = SimpleNamespace(backfill_with_context=True)
+    config = config_with(backfill_with_context=True)
 
     added = backfill.add_post_with_context(
         {"url": "https://remote.example/@a/1"}, home, http=http, config=config, state=state
@@ -247,7 +254,7 @@ def test_a_post_the_server_refuses_is_reported_as_not_added(state, home, http):
 
 def test_an_added_post_is_remembered(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=False)
+    config = config_with(backfill_with_context=False)
 
     added = backfill.add_post_with_context(
         {"url": "https://remote.example/@a/1"}, home, http=http, config=config, state=state
@@ -259,7 +266,7 @@ def test_an_added_post_is_remembered(state, home, http):
 
 def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=True)
+    config = config_with(backfill_with_context=True)
     post = {"url": "https://remote.example/@a/1", "replies_count": 2}
 
     with patch.object(backfill, "parse_url", return_value=("remote.example", "1")), \
@@ -273,7 +280,7 @@ def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
 
 def test_replies_are_left_alone_when_context_is_not_wanted(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=False)
+    config = config_with(backfill_with_context=False)
     post = {"url": "https://remote.example/@a/1", "replies_count": 2}
 
     with patch.object(backfill, "get_all_known_context_urls") as gather:
@@ -284,7 +291,7 @@ def test_replies_are_left_alone_when_context_is_not_wanted(state, home, http):
 
 def test_a_post_whose_url_we_cannot_parse_is_still_added(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=True)
+    config = config_with(backfill_with_context=True)
     post = {"url": "https://remote.example/@a/1", "replies_count": 2}
 
     with patch.object(backfill, "parse_url", return_value=None), \

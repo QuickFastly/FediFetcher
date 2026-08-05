@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from fedifetcher.servers import ApiFlavour
 
@@ -27,7 +27,7 @@ class PeerTubeApi:
             url = f'https://{self.webserver}/api/v1/accounts/{username}/videos'
             response = self._http.get(url)
             if response.status_code == 200:
-                return response.json()['data']
+                return cast("list[dict[str, Any]]", response.json()['data'])
 
             logger.error(f"Error getting posts by user {username} from {self.webserver}. Status Code: {response.status_code}")
             return None

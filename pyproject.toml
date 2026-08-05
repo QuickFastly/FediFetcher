@@ -15,8 +15,14 @@ ignore = [
 python_version = "3.11"
 files = ["find_posts.py", "get_context.py", "fedifetcher", "tests"]
 ignore_missing_imports = true
-warn_unused_ignores = true
-warn_redundant_casts = true
+strict = true
+
+# The test suite is not annotated yet. Drop these as each module is typed.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

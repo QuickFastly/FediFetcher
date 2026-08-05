@@ -21,7 +21,7 @@ def test_fetch_timeline_context_with_empty_posts(
     http,
     home,
 ):
-    config = SimpleNamespace(server="server_test", backfill_mentioned_users=False)
+    config = config_with(server="server_test")
 
     tasks.fetch_timeline_context([], home, http=http, config=config, state=state)
 

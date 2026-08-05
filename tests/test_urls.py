@@ -75,7 +75,9 @@ def test_parse_mastodon_url():
     null_url = None
 
     # Testing valid mastodon URL
-    server, toot_id = parse_mastodon_url(valid_url)
+    parsed = parse_mastodon_url(valid_url)
+    assert parsed is not None
+    server, toot_id = parsed
     assert server == "mastodon.social"
     assert toot_id == "1234"
 
@@ -84,7 +86,7 @@ def test_parse_mastodon_url():
 
     # Testing null URL
     with pytest.raises(TypeError):
-        parse_mastodon_url(null_url)
+        parse_mastodon_url(null_url)  # type: ignore[arg-type]
 
 
 def test_parse_mastodon_uri():
@@ -190,7 +192,9 @@ def test_parse_pixelfed_url_malformed():
 
 def test_parse_misskey_url():
     url = "https://misskey.io/notes/837jfe8372"
-    server, toot_id = parse_misskey_url(url)
+    parsed = parse_misskey_url(url)
+    assert parsed is not None
+    server, toot_id = parsed
     assert server == "misskey.io"
     assert toot_id == "837jfe8372"
 
@@ -265,7 +269,9 @@ def test_parse_peertube_url_no_match():
 
 def test_parse_pixelfed_profile_url_success():
     url = "https://pixelfed.server/user.name"
-    server, username = parse_pixelfed_profile_url(url)
+    parsed = parse_pixelfed_profile_url(url)
+    assert parsed is not None
+    server, username = parsed
     assert server == "pixelfed.server"
     assert username == "user.name"
 
@@ -333,9 +339,9 @@ def test_parse_lemmy_profile_url_with_community():
 
 
 def test_parse_peertube_profile_url_valid():
-    server, username = parse_peertube_profile_url(
-        "https://myserver.com/accounts/TestUser"
-    )
+    parsed = parse_peertube_profile_url("https://myserver.com/accounts/TestUser")
+    assert parsed is not None
+    server, username = parsed
     assert server == "myserver.com"
     assert username == "TestUser"
 
@@ -346,4 +352,4 @@ def test_parse_peertube_profile_url_invalid():
 
 def test_parse_peertube_profile_url_none():
     with pytest.raises(TypeError):
-        parse_peertube_profile_url(None)
+        parse_peertube_profile_url(None)  # type: ignore[arg-type]

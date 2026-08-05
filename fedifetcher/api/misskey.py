@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from fedifetcher.servers import ApiFlavour
 
@@ -32,7 +32,7 @@ class MisskeyApi:
             resp = self._http.post(url, { 'userId': user_id, 'limit': 40 })
 
             if resp.status_code == 200:
-                notes = resp.json()
+                notes: list[dict[str, Any]] = resp.json()
                 for note in notes:
                     if note.get('url') is None:
                         # add this to make it look like Mastodon status objects
@@ -59,7 +59,7 @@ class MisskeyApi:
 
             for user in resp.json():
                 if user['host'] is None:
-                    return user['id']
+                    return cast("str", user['id'])
         except Exception as ex:
             logger.error(f"Error finding user {username} from {self.webserver}. Exception: {ex}")
             return None

@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from fedifetcher import context
-from fedifetcher.context import add_context_urls, get_toot_context
+from fedifetcher.context import Toot, add_context_urls, get_toot_context
+from fedifetcher.urls import PostRef
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ recently_checked_context = {"existing_uri": toot_with_existing_uri}
 def test_get_all_known_context_urls(
     toot_has_parseable_url, parse_url, get_toot_context, state, http
 ):
-    reply_toots = [
+    reply_toots: list[Toot] = [
         {"url": "test_url_1", "reblog": None, "uri": "test_uri_1",
          "visibility": "public", "created_at": "2026-01-01T00:00:00+00:00"},
         {"url": "test_url_2", "reblog": {"url": "reblog_url_2"}, "uri": "test_uri_2",
@@ -132,10 +133,11 @@ def test_get_replied_toot_server_id_with_url_redirect(state):
         "in_reply_to_account_id": "1",
         "mentions": [{"id": "1", "acct": "account"}],
     }
-    with patch("fedifetcher.context.parse_url", return_value="match") as mock_parse:
+    match = PostRef("server", "1")
+    with patch("fedifetcher.context.parse_url", return_value=match) as mock_parse:
         assert context.get_replied_toot_server_id(
             "server", toot, http=http, state=state
-        ) == ("redirect_url", "match")
+        ) == ("redirect_url", match)
         mock_parse.assert_called_once_with("redirect_url", state.parsed_urls, http)
 
 
@@ -146,12 +148,12 @@ def test_get_replied_toot_server_id_with_existing_replied_toot_server_ids(state)
         "in_reply_to_account_id": "1",
         "mentions": [{"id": "1", "acct": "account"}],
     }
-    replied_toot_server_ids = {"https://server/@account/1": ("url", "match")}
+    cached = ("url", PostRef("server", "1"))
+    state.replied_toot_server_ids = {"https://server/@account/1": cached}
 
-    state.replied_toot_server_ids = replied_toot_server_ids
     assert context.get_replied_toot_server_id(
         "server", toot, http=http, state=state
-    ) == ("url", "match")
+    ) == cached
 
 
 @patch("fedifetcher.context.get_server_info")
@@ -320,7 +322,7 @@ def test_an_unparseable_redirect_is_remembered_as_a_dead_end(state, http, caplog
 
 
 def test_context_urls_skip_posts_we_already_host(state, http):
-    replied = [("https://remote.example/@a/1", ("remote.example", "1"))]
+    replied = [("https://remote.example/@a/1", PostRef("remote.example", "1"))]
 
     with patch.object(context, "get_toot_context",
                       return_value=["https://our.example/@x/1", "https://remote.example/@y/2"]):
