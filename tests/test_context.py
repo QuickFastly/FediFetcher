@@ -53,13 +53,13 @@ recently_checked_context = {"existing_uri": toot_with_existing_uri}
 
 
 @patch("fedifetcher.context.get_toot_context")
-@patch("fedifetcher.context.parse_url")
-def test_get_all_known_context_urls(parse_url, get_toot_context, state, http):
+@patch("fedifetcher.context.find_post")
+def test_get_all_known_context_urls(find_post, get_toot_context, state, http):
     reply_toots = [
         make_post(url="test_url_1", uri="test_uri_1"),
         make_post(url="test_url_2", uri="test_uri_2"),
     ]
-    parse_url.return_value = ("parsed_host", "parsed_id")
+    find_post.return_value = ("parsed_host", "parsed_id")
     get_toot_context.return_value = ["context_item_1", "context_item_2"]
 
     urls = context.get_all_known_context_urls(
@@ -101,11 +101,13 @@ def test_get_replied_toot_server_id_with_url_redirect(state):
         mentions=(make_user(id="1", acct="account"),),
     )
     match = PostRef("server", "1")
-    with patch("fedifetcher.context.parse_url", return_value=match) as mock_parse:
+    with patch("fedifetcher.context.find_post", return_value=match) as mock_parse:
         assert context.get_replied_toot_server_id(
             "server", toot, http=http, state=state
         ) == ("redirect_url", match)
-        mock_parse.assert_called_once_with("redirect_url", state.parsed_urls, http)
+        mock_parse.assert_called_once_with(
+            "redirect_url", state.parsed_urls, state.seen_hosts, http
+        )
 
 
 def test_get_replied_toot_server_id_with_existing_replied_toot_server_ids(state):
@@ -203,7 +205,7 @@ def public_toot(uri="https://remote.example/@a/1", **extra):
 
 
 def test_a_failed_context_lookup_is_reported(state, http, caplog):
-    with patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(context, "find_post", return_value=("remote.example", "1")), \
          patch.object(context, "get_toot_context", return_value=None):
         urls = context.get_all_known_context_urls(
             "our.example", [make_post()], http=http, state=state
@@ -217,7 +219,7 @@ def test_posts_already_on_our_own_server_are_not_returned(state, http):
     ours = "https://our.example/@a/2"
     theirs = "https://remote.example/@b/3"
 
-    with patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(context, "find_post", return_value=("remote.example", "1")), \
          patch.object(context, "get_toot_context", return_value=[ours, theirs]):
         urls = context.get_all_known_context_urls(
             "our.example", [make_post()], http=http, state=state
@@ -229,7 +231,7 @@ def test_posts_already_on_our_own_server_are_not_returned(state, http):
 def test_private_posts_are_not_asked_about(state, http):
     private = make_post(is_public=False)
 
-    with patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(context, "find_post", return_value=("remote.example", "1")), \
          patch.object(context, "get_toot_context") as fetch:
         context.get_all_known_context_urls(
             "our.example", [private], http=http, state=state
@@ -239,7 +241,7 @@ def test_private_posts_are_not_asked_about(state, http):
 
 
 def test_posts_we_cannot_parse_are_skipped(state, http):
-    with patch.object(context, "parse_url", return_value=None), \
+    with patch.object(context, "find_post", return_value=None), \
          patch.object(context, "get_toot_context") as fetch:
         context.get_all_known_context_urls(
             "our.example", [make_post()], http=http, state=state
@@ -251,7 +253,7 @@ def test_posts_we_cannot_parse_are_skipped(state, http):
 def test_a_reblog_is_followed_to_the_post_it_boosts(state, http):
     boost = make_post(reblog=make_post(url="https://remote.example/@original/9"))
 
-    with patch.object(context, "parse_url", return_value=("remote.example", "9")) as parse, \
+    with patch.object(context, "find_post", return_value=("remote.example", "9")) as parse, \
          patch.object(context, "get_toot_context", return_value=[]):
         context.get_all_known_context_urls(
             "our.example", [boost], http=http, state=state
@@ -277,7 +279,7 @@ def test_an_unparseable_redirect_is_remembered_as_a_dead_end(state, http, caplog
     )
     http.get_redirect_url.return_value = "https://elsewhere/nonsense"
 
-    with patch.object(context, "parse_url", return_value=None):
+    with patch.object(context, "find_post", return_value=None):
         result = context.get_replied_toot_server_id(
             "our.example", toot, http=http, state=state
         )

@@ -273,3 +273,63 @@ def test_a_list_without_a_name_is_still_a_list_we_can_read():
 
 def test_a_list_we_cannot_address_is_dropped():
     assert to_list({"title": "Friends"}) is None
+
+
+@pytest.mark.parametrize(
+    "profile_url,username",
+    [
+        ("https://mstdn.example/@someone", "someone"),          # mastodon and kin
+        ("https://pleroma.example/users/someone", "someone"),   # pleroma, akkoma
+        ("https://pixelfed.example/someone", "someone"),        # no prefix at all
+        ("https://pixelfed.example/someone/", "someone"),
+        # a post URL shares the prefix, and its author is the right answer
+        ("https://mstdn.example/@someone/12345", "someone"),
+    ],
+)
+def test_the_names_this_api_uses_for_an_account(api, profile_url, username):
+    assert api.username_from(profile_url) == username
+
+
+@pytest.mark.parametrize(
+    "profile_url",
+    [
+        "http://mstdn.example/@someone",
+        "not a url",
+    ],
+)
+def test_a_profile_url_this_api_does_not_use(api, profile_url):
+    assert api.username_from(profile_url) is None
+
+
+@pytest.mark.parametrize(
+    "post_url,post_id",
+    [
+        ("https://mstdn.example/@someone/12345", "12345"),
+        ("https://mstdn.example/users/someone/statuses/12345", "12345"),
+        ("https://pleroma.example/notice/12345", "12345"),          # pleroma, akkoma
+        ("https://pixelfed.example/p/someone/12345", "12345"),      # speaks this API
+    ],
+)
+def test_the_ways_this_api_addresses_a_post(api, post_url, post_id):
+    assert api.post_id_from(post_url) == post_id
+
+
+def test_a_pleroma_object_is_resolved_by_following_its_redirect(api, http):
+    http.get_redirect_url.return_value = "/notice/12345"
+
+    assert api.post_id_from("https://pleroma.example/objects/abc-def") == "12345"
+    http.get_redirect_url.assert_called_once_with("https://pleroma.example/objects/abc-def")
+
+
+def test_an_object_whose_redirect_goes_nowhere_cannot_be_read(api, http):
+    http.get_redirect_url.return_value = None
+    assert api.post_id_from("https://pleroma.example/objects/abc-def") is None
+
+
+def test_an_object_that_redirects_somewhere_unexpected_cannot_be_read(api, http):
+    http.get_redirect_url.return_value = "/somewhere/else"
+    assert api.post_id_from("https://pleroma.example/objects/abc-def") is None
+
+
+def test_a_post_url_this_api_does_not_use(api):
+    assert api.post_id_from("https://mstdn.example/notes/12345") is None

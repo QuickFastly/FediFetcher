@@ -4,10 +4,10 @@ import itertools
 import logging
 from typing import TYPE_CHECKING, cast
 
-from fedifetcher.api import client_for
+from fedifetcher.api import client_for, find_post
 from fedifetcher.posts import Post
 from fedifetcher.servers import get_server_info
-from fedifetcher.urls import PostRef, parse_url
+from fedifetcher.urls import PostRef
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -37,7 +37,7 @@ def get_all_known_context_urls(
     for toot in reply_toots:
         # a boost is only ever a pointer: the replies are on the original
         url = toot.original.url
-        parsed_url = parse_url(url, state.parsed_urls, http)
+        parsed_url = find_post(url, state.parsed_urls, state.seen_hosts, http)
         if parsed_url is None:
             continue
         if toot_context_can_be_fetched(toot) and state.recently_checked_context.should_fetch(toot.uri, toot.created_at):
@@ -91,7 +91,7 @@ def get_replied_toot_server_id(
     if url is None:
         return None
 
-    match = parse_url(url, state.parsed_urls, http)
+    match = find_post(url, state.parsed_urls, state.seen_hosts, http)
     if match is not None:
         state.replied_toot_server_ids[o_url] = (url, match)
         return (url, match)
