@@ -143,7 +143,17 @@ def parse_lemmy_profile_url(url: str) -> UserRef | None:
 
 
 def parse_peertube_profile_url(url: str) -> UserRef | None:
-    match = re.match(r"https://(?P<server>[^/]+)/accounts/(?P<username>[^/]+)", url)
+    """PeerTube has accounts and channels, each with a long and a short form.
+
+    /c/name never reaches here through parse_user_url: the Lemmy matcher above
+    claims it first and reads the same name out of it. It is matched anyway so
+    that this answers for every URL PeerTube uses, whoever asks and in
+    whatever order.
+    """
+    match = re.match(
+        r"https://(?P<server>[^/]+)/(?:accounts|a|video-channels|c)/(?P<username>[^/]+)",
+        url,
+    )
     if match is not None:
         return UserRef(match.group("server"), match.group("username"))
     return None

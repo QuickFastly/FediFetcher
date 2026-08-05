@@ -91,3 +91,24 @@ def test_a_video_falls_back_to_when_it_was_created():
 
 def test_a_peertube_video_without_a_url_is_dropped():
     assert to_post({"publishedAt": WHEN}) is None
+
+
+@pytest.mark.parametrize(
+    "profile_url,endpoint",
+    [
+        # a channel and the account that owns it are asked for separately
+        ("https://video.example/video-channels/a-channel", "video-channels/a-channel"),
+        ("https://video.example/c/a-channel", "video-channels/a-channel"),
+        ("https://video.example/accounts/someone", "accounts/someone"),
+        ("https://video.example/a/someone", "accounts/someone"),
+        # anything unrecognised is tried as an account, as it always was
+        ("https://video.example/someone", "accounts/someone"),
+    ],
+)
+def test_videos_are_asked_for_from_the_right_collection(api, http, reply, profile_url, endpoint):
+    http.get.return_value = reply(200, {"data": []})
+    name = profile_url.rsplit("/", 1)[1]
+
+    api.fetch_user_posts(name, profile_url)
+
+    assert http.get.call_args[0][0] == f"https://video.example/api/v1/{endpoint}/videos"
