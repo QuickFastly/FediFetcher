@@ -37,7 +37,10 @@ def to_post(raw: dict[str, Any]) -> Post | None:
         is_public=raw.get("visibility") in PUBLIC,
         reblog=to_post(boosted) if boosted is not None else None,
         in_reply_to_id=raw.get("in_reply_to_id"),
+        in_reply_to_account_id=raw.get("in_reply_to_account_id"),
         reply_count=raw.get("replies_count"),
+        account=to_user(raw["account"]) if raw.get("account") else None,
+        mentions=tuple(usable(to_user(m) for m in raw.get("mentions") or [])),
     )
 
 
@@ -53,6 +56,7 @@ def to_user(raw: dict[str, Any]) -> User | None:
     return User(
         acct=acct,
         url=url,
+        id=raw.get("id"),
         note=note if isinstance(note, str) else "",
         # absent means the account never said, which is not the same as no
         indexable=raw.get("indexable", True),

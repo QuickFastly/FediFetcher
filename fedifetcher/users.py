@@ -16,6 +16,9 @@ class User:
 
     acct: str
     url: str
+    # what the server that sent us this account calls it, which is how a post
+    # says who it replied to. Only meaningful on the server it came from.
+    id: str | None = None
     note: str = ""
     indexable: bool = True
     discoverable: bool = True

@@ -228,3 +228,33 @@ def test_an_account_we_cannot_name_or_reach_is_dropped(missing):
     del raw[missing]
 
     assert to_user(raw) is None
+
+
+def test_a_status_carries_who_wrote_it_and_who_it_names():
+    post = built(to_post({
+        "url": "u", "created_at": WHEN,
+        "in_reply_to_id": "7", "in_reply_to_account_id": "99",
+        "account": account(acct="author@remote.example"),
+        "mentions": [account(acct="mentioned@remote.example", id="99")],
+    }))
+
+    assert built(post.account).acct == "author@remote.example"
+    assert [m.acct for m in post.mentions] == ["mentioned@remote.example"]
+    # how a reply is matched to the account it answers
+    assert post.mentions[0].id == post.in_reply_to_account_id
+
+
+def test_a_status_that_names_nobody_carries_nobody():
+    post = built(to_post({"url": "u", "created_at": WHEN}))
+
+    assert post.account is None
+    assert post.mentions == ()
+
+
+def test_a_mention_we_cannot_use_is_dropped_without_losing_the_post():
+    post = built(to_post({
+        "url": "u", "created_at": WHEN,
+        "mentions": [{"id": "1"}, account(acct="fine@remote.example")],
+    }))
+
+    assert [m.acct for m in post.mentions] == ["fine@remote.example"]
