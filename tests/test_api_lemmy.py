@@ -118,3 +118,18 @@ def test_a_lemmy_post_is_named_by_its_activitypub_id():
 
 def test_a_lemmy_post_without_an_id_is_dropped():
     assert to_post({"published": WHEN}) is None
+
+
+@pytest.mark.parametrize(
+    "profile_url,username",
+    [
+        ("https://lemmy.example/u/someone", "someone"),
+        ("https://lemmy.example/c/a-community", "a-community"),
+    ],
+)
+def test_the_names_this_api_uses_for_an_account(api, profile_url, username):
+    assert api.username_from(profile_url) == username
+
+
+def test_a_profile_url_this_api_does_not_use(api):
+    assert api.username_from("https://lemmy.example/someone") is None

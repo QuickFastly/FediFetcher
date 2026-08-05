@@ -8,6 +8,7 @@ three things all of those translations have in common.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, TypeVar
@@ -17,6 +18,15 @@ from dateutil import parser
 logger = logging.getLogger("FediFetcher")
 
 T = TypeVar("T")
+
+
+def first_name_in(patterns: Iterable[re.Pattern[str]], url: str) -> str | None:
+    """The username the first of these patterns finds in a URL, if any"""
+    for pattern in patterns:
+        match = pattern.match(url)
+        if match is not None:
+            return match.group("username")
+    return None
 
 
 def usable(things: Iterable[T | None]) -> list[T]:

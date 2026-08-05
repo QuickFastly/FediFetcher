@@ -4,48 +4,17 @@ import pytest
 
 from fedifetcher.urls import (
     PostRef,
-    UserRef,
-    parse_lemmy_profile_url,
+    host_of,
     parse_lemmy_url,
-    parse_mastodon_profile_url,
     parse_mastodon_uri,
     parse_mastodon_url,
     parse_misskey_url,
-    parse_peertube_profile_url,
     parse_peertube_url,
-    parse_pixelfed_profile_url,
     parse_pixelfed_url,
-    parse_pleroma_profile_url,
     parse_pleroma_uri,
     parse_pleroma_url,
     parse_url,
-    parse_user_url,
 )
-
-
-def test_parse_user_url_dispatches_by_shape():
-    assert parse_user_url("https://mstdn.thms.uk/@nanos") == UserRef(
-        "mstdn.thms.uk", "nanos"
-    )
-    assert parse_user_url("https://pleroma.server/users/username") == UserRef(
-        "pleroma.server", "username"
-    )
-    assert parse_user_url("https://lemmy.world/u/someone") == UserRef(
-        "lemmy.world", "someone"
-    )
-    assert parse_user_url("https://video.example/accounts/channel") == UserRef(
-        "video.example", "channel"
-    )
-    # Pixelfed profiles have no subdirectory, so this matcher runs last and
-    # catches anything the others rejected.
-    assert parse_user_url("https://pixelfed.social/username") == UserRef(
-        "pixelfed.social", "username"
-    )
-
-
-def test_parse_user_url_logs_and_returns_none_when_unparseable(caplog):
-    assert parse_user_url("not a url") is None
-    assert "Error parsing Profile URL not a url" in caplog.text
 
 
 def test_refs_are_tuples():
@@ -55,18 +24,6 @@ def test_refs_are_tuples():
     assert ref[0] == ref.server
     assert ref[1] == ref.post_id
     assert isinstance(ref, PostRef)
-
-
-def test_parse_mastodon_profile_url_success():
-    url = "https://mastodon.social/@username"
-    result = parse_mastodon_profile_url(url)
-    assert result == ("mastodon.social", "username")
-
-
-def test_parse_mastodon_profile_url_not_match():
-    url = "https://mastodon.social/username"
-    result = parse_mastodon_profile_url(url)
-    assert result is None
 
 
 def test_parse_mastodon_url():
@@ -149,30 +106,6 @@ def test_parse_pleroma_uri():
     # Test that a valid URI is correctly parsed
     uri = "https://friedcheese.us/notice/Arv4zBVnAR84mmkVay"
     assert parse_pleroma_uri(uri) == ("friedcheese.us", "Arv4zBVnAR84mmkVay")
-
-
-def test_parse_pleroma_profile_url():
-    # successful parsing
-    result = parse_pleroma_profile_url("https://pleroma.server/users/username")
-    assert result == ("pleroma.server", "username")
-
-    # unsuccessful parsing
-    result = parse_pleroma_profile_url("http://notvalid/url")
-    assert result is None
-
-    # url with extra path and query string
-    result = parse_pleroma_profile_url(
-        "https://pleroma.server/users/username/extra/path?arg=value"
-    )
-    assert result == ("pleroma.server", "username")
-
-    # url with www
-    result = parse_pleroma_profile_url("https://www.pleroma.server/users/username")
-    assert result == ("www.pleroma.server", "username")
-
-    # url without https
-    result = parse_pleroma_profile_url("http://pleroma.server/users/username")
-    assert result is None
 
 
 def test_parse_pixelfed_url():
@@ -267,27 +200,6 @@ def test_parse_peertube_url_no_match():
     assert result is None
 
 
-def test_parse_pixelfed_profile_url_success():
-    url = "https://pixelfed.server/user.name"
-    parsed = parse_pixelfed_profile_url(url)
-    assert parsed is not None
-    server, username = parsed
-    assert server == "pixelfed.server"
-    assert username == "user.name"
-
-
-def test_parse_pixelfed_profile_url_invalid_url():
-    url = "pixelfed.server/user.name"
-    result = parse_pixelfed_profile_url(url)
-    assert result is None
-
-
-def test_parse_pixelfed_profile_url_empty_url():
-    url = ""
-    result = parse_pixelfed_profile_url(url)
-    assert result is None
-
-
 def test_parse_lemmy_url_success():
     url = "https://testserver/post/1234"
 
@@ -320,58 +232,23 @@ def test_parse_lemmy_url_fail_no_protocol():
     assert result is None
 
 
-def test_parse_lemmy_profile_url():
-    url = "https://my.lemmy.server/u/username"
-    result = parse_lemmy_profile_url(url)
-    assert result == ("my.lemmy.server", "username")
 
-
-def test_parse_lemmy_profile_url_no_match():
-    url = "http://my.lemmy.server/u/username"
-    result = parse_lemmy_profile_url(url)
-    assert result is None
-
-
-def test_parse_lemmy_profile_url_with_community():
-    url = "https://my.lemmy.server/c/username"
-    result = parse_lemmy_profile_url(url)
-    assert result == ("my.lemmy.server", "username")
-
-
-def test_parse_peertube_profile_url_valid():
-    parsed = parse_peertube_profile_url("https://myserver.com/accounts/TestUser")
-    assert parsed is not None
-    server, username = parsed
-    assert server == "myserver.com"
-    assert username == "TestUser"
+@pytest.mark.parametrize(
+    "url,host",
+    [
+        ("https://mstdn.example/@someone", "mstdn.example"),
+        ("https://video.example/video-channels/a-channel", "video.example"),
+        ("https://example.test", "example.test"),
+        ("https://example.test:8443/@a", "example.test:8443"),
+    ],
+)
+def test_the_host_is_read_without_knowing_the_software(url, host):
+    assert host_of(url) == host
 
 
 @pytest.mark.parametrize(
-    "url,username",
-    [
-        ("https://video.example/accounts/someone", "someone"),
-        ("https://video.example/a/someone", "someone"),
-        ("https://video.example/video-channels/a-channel", "a-channel"),
-        ("https://video.example/c/a-channel", "a-channel"),
-    ],
+    "url",
+    ["http://mstdn.example/@someone", "not a url", "", "ftp://example.test/x"],
 )
-def test_peertube_names_accounts_and_channels_long_and_short(url, username):
-    parsed = parse_peertube_profile_url(url)
-    assert parsed is not None
-    assert parsed.username == username
-
-
-def test_a_peertube_channel_shorthand_is_read_by_the_lemmy_matcher():
-    """/c/name is Lemmy's pattern too, and it reads the same name out of it"""
-    parsed = parse_user_url("https://video.example/c/a-channel")
-    assert parsed is not None
-    assert parsed.username == "a-channel"
-
-
-def test_parse_peertube_profile_url_invalid():
-    assert parse_peertube_profile_url("https://invalidurl.com/TestUser") is None
-
-
-def test_parse_peertube_profile_url_none():
-    with pytest.raises(TypeError):
-        parse_peertube_profile_url(None)  # type: ignore[arg-type]
+def test_a_url_we_cannot_take_a_host_from(url):
+    assert host_of(url) is None

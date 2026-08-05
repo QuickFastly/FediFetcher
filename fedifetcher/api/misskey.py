@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
-from fedifetcher.translate import parse_date, unusable, usable
+from fedifetcher.translate import first_name_in, parse_date, unusable, usable
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient
@@ -14,6 +15,8 @@ logger = logging.getLogger("FediFetcher")
 
 # "home" is Misskey's unlisted: public, but kept off the public timelines
 PUBLIC = ("public", "home")
+
+PROFILE_PATHS = (re.compile(r"^https://[^/]+/@(?P<username>[^/]+)"),)
 
 
 def to_post(raw: dict[str, Any], webserver: str) -> Post | None:
@@ -45,6 +48,9 @@ class MisskeyApi:
     def __init__(self, webserver: str, http: HttpClient) -> None:
         self.webserver = webserver
         self._http = http
+
+    def username_from(self, profile_url: str) -> str | None:
+        return first_name_in(PROFILE_PATHS, profile_url)
 
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         user_id = self._find_user_id(username)

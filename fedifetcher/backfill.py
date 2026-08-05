@@ -7,7 +7,7 @@ from fedifetcher.api import client_for
 from fedifetcher.context import add_context_urls, get_all_known_context_urls
 from fedifetcher.posts import Post
 from fedifetcher.servers import get_server_info
-from fedifetcher.urls import parse_url, parse_user_url
+from fedifetcher.urls import host_of, parse_url
 from fedifetcher.users import User
 
 if TYPE_CHECKING:
@@ -47,28 +47,36 @@ def get_user_posts(
     if user_has_opted_out(user):
         logger.debug(f"User {user.acct} has opted out of backfilling")
         return None
-    parsed_url = parse_user_url(user.url)
+    host = host_of(user.url)
 
-    if parsed_url is None:
+    if host is None:
+        logger.error(f"Error parsing Profile URL {user.url}")
         # We are adding it as 'known' anyway, because we won't be able to fix this.
         target.add(user.acct)
         return None
 
-    if(parsed_url[0] == server):
+    if host == server:
         logger.debug(f"{user.acct} is a local user. Skip")
         target.add(user.acct)
         return None
 
-    post_server = get_server_info(parsed_url[0], state.seen_hosts, http=http)
+    post_server = get_server_info(host, state.seen_hosts, http=http)
     if post_server is None:
-        logger.error(f'server {parsed_url[0]} not found for post')
+        logger.error(f'server {host} not found for post')
         return None
 
     client = client_for(post_server, http)
     if client is None:
         return None
 
-    return client.fetch_user_posts(parsed_url[1], user.url)
+    # the server has told us what it runs, so only its own URL shapes are tried
+    username = client.username_from(user.url)
+    if username is None:
+        logger.error(f"Error parsing Profile URL {user.url}")
+        target.add(user.acct)
+        return None
+
+    return client.fetch_user_posts(username, user.url)
 
 def add_post_with_context(
     post: Post, home: HomeServer, *, http: HttpClient, config: Config, state: State

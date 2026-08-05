@@ -143,3 +143,12 @@ def test_a_misskey_note_says_what_it_replied_to_in_its_own_words():
 
 def test_a_misskey_note_without_an_id_is_dropped():
     assert to_post({"createdAt": WHEN}, "misskey.example") is None
+
+
+def test_the_name_this_api_uses_for_an_account(api):
+    assert api.username_from("https://misskey.example/@someone") == "someone"
+
+
+def test_a_profile_url_this_api_does_not_use(api):
+    # a Misskey account is only ever @name, never a bare path
+    assert api.username_from("https://misskey.example/someone") is None

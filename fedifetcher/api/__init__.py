@@ -22,6 +22,14 @@ class FediverseApi(Protocol):
 
     flavour: ClassVar[ApiFlavour]
 
+    def username_from(self, profile_url: str) -> str | None:
+        """The name in one of this server's profile URLs, or None if it is not one.
+
+        Only ever asked of a server we have already identified, so each client
+        answers for its own URL shapes and no others.
+        """
+        ...
+
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         """Recent posts by an account, or None if they could not be read"""
         ...

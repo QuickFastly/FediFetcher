@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
@@ -10,7 +11,7 @@ from dateutil import parser
 from fedifetcher.lists import UserList
 from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
-from fedifetcher.translate import parse_date, unusable, usable
+from fedifetcher.translate import first_name_in, parse_date, unusable, usable
 from fedifetcher.users import User
 
 if TYPE_CHECKING:
@@ -20,6 +21,16 @@ logger = logging.getLogger("FediFetcher")
 
 # a status anyone is allowed to read
 PUBLIC = ("public", "unlisted")
+
+# one flavour, several ways of naming an account: Mastodon and its kin use
+# @name, Pleroma and Akkoma /users/name, and Pixelfed no prefix at all. The
+# last would swallow any URL if it were tried against other software, which
+# is why nothing asks this of a server it has not identified first.
+PROFILE_PATHS = (
+    re.compile(r"^https://[^/]+/@(?P<username>[^/]+)"),
+    re.compile(r"^https://[^/]+/users/(?P<username>[^/]+)"),
+    re.compile(r"^https://[^/]+/(?P<username>[^/]+)/?$"),
+)
 
 
 def to_post(raw: dict[str, Any]) -> Post | None:
@@ -110,6 +121,9 @@ class MastodonApi:
             raise Exception(
                 f"Error getting URL {url}. Status code: {response.status_code}"
             )
+
+    def username_from(self, profile_url: str) -> str | None:
+        return first_name_in(PROFILE_PATHS, profile_url)
 
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         try:

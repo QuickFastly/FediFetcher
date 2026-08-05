@@ -273,3 +273,29 @@ def test_a_list_without_a_name_is_still_a_list_we_can_read():
 
 def test_a_list_we_cannot_address_is_dropped():
     assert to_list({"title": "Friends"}) is None
+
+
+@pytest.mark.parametrize(
+    "profile_url,username",
+    [
+        ("https://mstdn.example/@someone", "someone"),          # mastodon and kin
+        ("https://pleroma.example/users/someone", "someone"),   # pleroma, akkoma
+        ("https://pixelfed.example/someone", "someone"),        # no prefix at all
+        ("https://pixelfed.example/someone/", "someone"),
+        # a post URL shares the prefix, and its author is the right answer
+        ("https://mstdn.example/@someone/12345", "someone"),
+    ],
+)
+def test_the_names_this_api_uses_for_an_account(api, profile_url, username):
+    assert api.username_from(profile_url) == username
+
+
+@pytest.mark.parametrize(
+    "profile_url",
+    [
+        "http://mstdn.example/@someone",
+        "not a url",
+    ],
+)
+def test_a_profile_url_this_api_does_not_use(api, profile_url):
+    assert api.username_from(profile_url) is None

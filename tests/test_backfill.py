@@ -217,6 +217,7 @@ def test_a_server_we_cannot_talk_to_yields_nothing(state, http):
 
 def test_posts_come_from_the_client_for_that_server(state, http):
     client = Mock()
+    client.username_from.return_value = "someone"
     client.fetch_user_posts.return_value = [make_post()]
 
     with patch.object(backfill, "get_server_info", return_value=Mock()), \
