@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from fedifetcher import tasks
+from fedifetcher.lists import UserList
 from fedifetcher.store import State
 from tests.conftest import make_post, make_user
 
@@ -290,7 +291,7 @@ def test_only_a_bounded_number_of_users_is_backfilled():
 
 def test_lists_pull_both_replies_and_members():
     ctx = real_context(from_lists=True, max_list_length=50, max_list_accounts=5)
-    ctx.home.lists.return_value = [{"id": "42", "title": "Friends"}]
+    ctx.home.lists.return_value = [UserList(id="42", title="Friends")]
     ctx.home.list_timeline.return_value = ["a post"]
     ctx.home.list_accounts.return_value = ["an account"]
 
@@ -306,7 +307,7 @@ def test_lists_pull_both_replies_and_members():
 
 def test_lists_can_fetch_replies_without_backfilling_members():
     ctx = real_context(from_lists=True, max_list_length=50, max_list_accounts=0)
-    ctx.home.lists.return_value = [{"id": "42", "title": "Friends"}]
+    ctx.home.lists.return_value = [UserList(id="42", title="Friends")]
     ctx.home.list_timeline.return_value = ["a post"]
 
     with patch.object(tasks, "fetch_timeline_context"), \

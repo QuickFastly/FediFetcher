@@ -3,7 +3,7 @@ from typing import TypeVar
 
 import pytest
 
-from fedifetcher.api.mastodon import MastodonApi, to_post, to_user
+from fedifetcher.api.mastodon import MastodonApi, to_list, to_post, to_user
 from fedifetcher.servers import ApiFlavour
 
 
@@ -258,3 +258,18 @@ def test_a_mention_we_cannot_use_is_dropped_without_losing_the_post():
     }))
 
     assert [m.acct for m in post.mentions] == ["fine@remote.example"]
+
+
+def test_a_list_is_its_id_and_what_the_owner_called_it():
+    user_list = built(to_list({"id": "42", "title": "Friends"}))
+
+    assert user_list.id == "42"
+    assert user_list.title == "Friends"
+
+
+def test_a_list_without_a_name_is_still_a_list_we_can_read():
+    assert built(to_list({"id": "42"})).title == ""
+
+
+def test_a_list_we_cannot_address_is_dropped():
+    assert to_list({"title": "Friends"}) is None

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 
 from dateutil import parser
 
+from fedifetcher.lists import UserList
 from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
 from fedifetcher.translate import parse_date, unusable, usable
@@ -62,6 +63,16 @@ def to_user(raw: dict[str, Any]) -> User | None:
         indexable=raw.get("indexable", True),
         discoverable=raw.get("discoverable", True),
     )
+
+
+def to_list(raw: dict[str, Any]) -> UserList | None:
+    """One of the lists our own server keeps for the API key owner"""
+    list_id = raw.get("id")
+    if list_id is None:
+        unusable("mastodon", raw.get("title"))
+        return None
+
+    return UserList(id=list_id, title=raw.get("title") or "")
 
 
 class MastodonApi:
@@ -253,8 +264,8 @@ class HomeServer:
     def following(self, user_id: str, limit: int) -> list[User]:
         return self._accounts(f"/api/v1/accounts/{user_id}/following", limit)
 
-    def lists(self) -> list[Any]:
-        return self._paginated("/api/v1/lists", 99)
+    def lists(self) -> list[UserList]:
+        return usable(to_list(raw) for raw in self._paginated("/api/v1/lists", 99))
 
     def list_timeline(self, list_id: str, limit: int) -> list[Post]:
         return self._posts(f"/api/v1/timelines/list/{list_id}", limit)

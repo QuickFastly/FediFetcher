@@ -125,13 +125,13 @@ def fetch_from_lists(ctx: Context) -> None:
     logger.info(f"Getting context for {len(lists)} lists")
     for user_list in lists:
         if ctx.config.max_list_length > 0:
-            timeline_toots = ctx.home.list_timeline(user_list['id'], ctx.config.max_list_length)
-            logger.info(f"Found {len(timeline_toots)} toots in list {user_list['title']}")
+            timeline_toots = ctx.home.list_timeline(user_list.id, ctx.config.max_list_length)
+            logger.info(f"Found {len(timeline_toots)} toots in list {user_list.title}")
             fetch_timeline_context(timeline_toots, ctx.home, http=ctx.http, config=ctx.config, state=ctx.state)
 
         if ctx.config.max_list_accounts:
-            accounts = ctx.home.list_accounts(user_list['id'], ctx.config.max_list_accounts)
-            logger.info(f"Found {len(accounts)} accounts in list {user_list['title']}")
+            accounts = ctx.home.list_accounts(user_list.id, ctx.config.max_list_accounts)
+            logger.info(f"Found {len(accounts)} accounts in list {user_list.title}")
             add_user_posts(ctx.home, accounts, ctx.state.recently_checked_users, http=ctx.http, config=ctx.config, state=ctx.state)
 
 
