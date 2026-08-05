@@ -16,7 +16,8 @@ logger = logging.getLogger("FediFetcher")
 COMMUNITY_PATH = re.compile(r"^https://[^/]+/c/")
 USER_PATH = re.compile(r"^https://[^/]+/u/")
 
-PROFILE_PATHS = (re.compile(r"^https://[^/]+/(?:u|c)/(?P<username>[^/]+)"),)
+PROFILE_PATHS = (re.compile(r"^https://[^/]+/(?:u|c)/(?P<name>[^/]+)"),)
+POST_PATHS = (re.compile(r"^https://[^/]+/(?:comment|post)/(?P<name>[^/]+)"),)
 
 
 def to_post(raw: dict[str, Any]) -> Post | None:
@@ -42,6 +43,9 @@ class LemmyApi:
 
     def username_from(self, profile_url: str) -> str | None:
         return first_name_in(PROFILE_PATHS, profile_url)
+
+    def post_id_from(self, post_url: str) -> str | None:
+        return first_name_in(POST_PATHS, post_url)
 
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         if COMMUNITY_PATH.match(profile_url):

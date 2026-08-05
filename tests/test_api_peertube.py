@@ -130,3 +130,19 @@ def test_the_names_this_api_uses_for_an_account(api, profile_url, username):
 
 def test_a_profile_url_this_api_does_not_use(api):
     assert api.username_from("https://video.example/someone") is None
+
+
+def test_the_way_this_api_addresses_a_post(api):
+    url = "https://video.example/videos/watch/56f1d0b5-d98f-4bad-b1e7-648ae074ab9d"
+    assert api.post_id_from(url) == "56f1d0b5-d98f-4bad-b1e7-648ae074ab9d"
+
+
+@pytest.mark.parametrize(
+    "post_url",
+    [
+        "https://video.example/watch/123456789",   # missing the /videos/ prefix
+        "https://video.example/videos/123456789",  # missing the /watch/ part
+    ],
+)
+def test_a_post_url_this_api_does_not_use(api, post_url):
+    assert api.post_id_from(post_url) is None

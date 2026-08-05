@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from fedifetcher.api import client_for
+from fedifetcher.api import client_for, find_post
 from fedifetcher.context import add_context_urls, get_all_known_context_urls
 from fedifetcher.posts import Post
 from fedifetcher.servers import get_server_info
-from fedifetcher.urls import host_of, parse_url
+from fedifetcher.urls import host_of
 from fedifetcher.users import User
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ def add_post_with_context(
     if added is True:
         state.seen_urls.add(post.url)
         if post.may_have_context and config.backfill_with_context:
-            parsed = parse_url(post.url, state.parsed_urls, http)
+            parsed = find_post(post.url, state.parsed_urls, state.seen_hosts, http)
             if parsed is None:
                 return True
             known_context_urls = get_all_known_context_urls(home.server, [post], http=http, state=state)

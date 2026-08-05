@@ -261,7 +261,7 @@ def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
     config = config_with(backfill_with_context=True)
     post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
-    with patch.object(backfill, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(backfill, "find_post", return_value=("remote.example", "1")), \
          patch.object(backfill, "get_all_known_context_urls", return_value=["u"]) as gather, \
          patch.object(backfill, "add_context_urls") as add:
         backfill.add_post_with_context(post, home, http=http, config=config, state=state)
@@ -286,7 +286,7 @@ def test_a_post_whose_url_we_cannot_parse_is_still_added(state, home, http):
     config = config_with(backfill_with_context=True)
     post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
-    with patch.object(backfill, "parse_url", return_value=None), \
+    with patch.object(backfill, "find_post", return_value=None), \
          patch.object(backfill, "get_all_known_context_urls") as gather:
         added = backfill.add_post_with_context(
             post, home, http=http, config=config, state=state

@@ -152,3 +152,15 @@ def test_the_name_this_api_uses_for_an_account(api):
 def test_a_profile_url_this_api_does_not_use(api):
     # a Misskey account is only ever @name, never a bare path
     assert api.username_from("https://misskey.example/someone") is None
+
+
+def test_the_way_this_api_addresses_a_post(api):
+    assert api.post_id_from("https://misskey.example/notes/abc123") == "abc123"
+
+
+@pytest.mark.parametrize(
+    "post_url",
+    ["https://misskey.example/@someone/abc123", "https://misskey.example/notes/"],
+)
+def test_a_post_url_this_api_does_not_use(api, post_url):
+    assert api.post_id_from(post_url) is None

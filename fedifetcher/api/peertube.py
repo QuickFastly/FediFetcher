@@ -20,8 +20,9 @@ PUBLIC = (1, 2)  # public, unlisted
 CHANNEL_PATH = re.compile(r"^https://[^/]+/(?:video-channels|c)/")
 
 PROFILE_PATHS = (
-    re.compile(r"^https://[^/]+/(?:accounts|a|video-channels|c)/(?P<username>[^/]+)"),
+    re.compile(r"^https://[^/]+/(?:accounts|a|video-channels|c)/(?P<name>[^/]+)"),
 )
+POST_PATHS = (re.compile(r"^https://[^/]+/videos/watch/(?P<name>[^/]+)"),)
 
 
 def to_post(raw: dict[str, Any]) -> Post | None:
@@ -52,6 +53,9 @@ class PeerTubeApi:
 
     def username_from(self, profile_url: str) -> str | None:
         return first_name_in(PROFILE_PATHS, profile_url)
+
+    def post_id_from(self, post_url: str) -> str | None:
+        return first_name_in(POST_PATHS, post_url)
 
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         # a channel and the account that owns it are different things here, and

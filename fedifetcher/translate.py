@@ -21,11 +21,15 @@ T = TypeVar("T")
 
 
 def first_name_in(patterns: Iterable[re.Pattern[str]], url: str) -> str | None:
-    """The username the first of these patterns finds in a URL, if any"""
+    """What the first of these patterns picks out of a URL, if any.
+
+    Each pattern captures the one part worth having as `name` — an account on
+    a profile URL, a post id on a post URL — so the same matching serves both.
+    """
     for pattern in patterns:
         match = pattern.match(url)
         if match is not None:
-            return match.group("username")
+            return match.group("name")
     return None
 
 

@@ -26,10 +26,24 @@ PUBLIC = ("public", "unlisted")
 # @name, Pleroma and Akkoma /users/name, and Pixelfed no prefix at all. The
 # last would swallow any URL if it were tried against other software, which
 # is why nothing asks this of a server it has not identified first.
+# every way this family addresses a post. Pixelfed is here too: it speaks the
+# Mastodon API, so its /p/user/id URLs are this client's to read.
+POST_PATHS = (
+    re.compile(r"^https://[^/]+/@[^/]+/(?P<name>[^/]+)"),
+    re.compile(r"^https://[^/]+/users/[^/]+/statuses/(?P<name>[^/]+)"),
+    re.compile(r"^https://[^/]+/notice/(?P<name>[^/]+)"),
+    re.compile(r"^https://[^/]+/p/[^/]+/(?P<name>[^/]+)"),
+)
+
+# Pleroma also addresses a post by an opaque object id, and only the redirect
+# it serves says which notice that object is
+OBJECT_PATH = re.compile(r"^https://[^/]+/objects/[^/]+")
+REDIRECTED_NOTICE = (re.compile(r"/notice/(?P<name>[^/]+)"),)
+
 PROFILE_PATHS = (
-    re.compile(r"^https://[^/]+/@(?P<username>[^/]+)"),
-    re.compile(r"^https://[^/]+/users/(?P<username>[^/]+)"),
-    re.compile(r"^https://[^/]+/(?P<username>[^/]+)/?$"),
+    re.compile(r"^https://[^/]+/@(?P<name>[^/]+)"),
+    re.compile(r"^https://[^/]+/users/(?P<name>[^/]+)"),
+    re.compile(r"^https://[^/]+/(?P<name>[^/]+)/?$"),
 )
 
 
@@ -124,6 +138,14 @@ class MastodonApi:
 
     def username_from(self, profile_url: str) -> str | None:
         return first_name_in(PROFILE_PATHS, profile_url)
+
+    def post_id_from(self, post_url: str) -> str | None:
+        if OBJECT_PATH.match(post_url):
+            redirect = self._http.get_redirect_url(post_url)
+            if redirect is None:
+                return None
+            return first_name_in(REDIRECTED_NOTICE, redirect)
+        return first_name_in(POST_PATHS, post_url)
 
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         try:

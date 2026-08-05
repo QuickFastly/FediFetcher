@@ -133,3 +133,22 @@ def test_the_names_this_api_uses_for_an_account(api, profile_url, username):
 
 def test_a_profile_url_this_api_does_not_use(api):
     assert api.username_from("https://lemmy.example/someone") is None
+
+
+@pytest.mark.parametrize(
+    "post_url,post_id",
+    [
+        ("https://lemmy.example/post/1234", "1234"),
+        ("https://lemmy.example/comment/5678", "5678"),
+    ],
+)
+def test_the_ways_this_api_addresses_a_post(api, post_url, post_id):
+    assert api.post_id_from(post_url) == post_id
+
+
+@pytest.mark.parametrize(
+    "post_url",
+    ["https://lemmy.example/post/", "https://lemmy.example/notes/1234", "not a url"],
+)
+def test_a_post_url_this_api_does_not_use(api, post_url):
+    assert api.post_id_from(post_url) is None
