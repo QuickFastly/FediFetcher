@@ -346,6 +346,28 @@ def test_parse_peertube_profile_url_valid():
     assert username == "TestUser"
 
 
+@pytest.mark.parametrize(
+    "url,username",
+    [
+        ("https://video.example/accounts/someone", "someone"),
+        ("https://video.example/a/someone", "someone"),
+        ("https://video.example/video-channels/a-channel", "a-channel"),
+        ("https://video.example/c/a-channel", "a-channel"),
+    ],
+)
+def test_peertube_names_accounts_and_channels_long_and_short(url, username):
+    parsed = parse_peertube_profile_url(url)
+    assert parsed is not None
+    assert parsed.username == username
+
+
+def test_a_peertube_channel_shorthand_is_read_by_the_lemmy_matcher():
+    """/c/name is Lemmy's pattern too, and it reads the same name out of it"""
+    parsed = parse_user_url("https://video.example/c/a-channel")
+    assert parsed is not None
+    assert parsed.username == "a-channel"
+
+
 def test_parse_peertube_profile_url_invalid():
     assert parse_peertube_profile_url("https://invalidurl.com/TestUser") is None
 

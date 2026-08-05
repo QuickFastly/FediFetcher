@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from fedifetcher.posts import Post
@@ -15,6 +16,8 @@ logger = logging.getLogger("FediFetcher")
 # PeerTube says who may watch with a number: the rest of its VideoPrivacy enum
 # is 3 private, 4 internal and 5 password protected
 PUBLIC = (1, 2)  # public, unlisted
+
+CHANNEL_PATH = re.compile(r"^https://[^/]+/(?:video-channels|c)/")
 
 
 def to_post(raw: dict[str, Any]) -> Post | None:
@@ -44,8 +47,12 @@ class PeerTubeApi:
         self._http = http
 
     def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
+        # a channel and the account that owns it are different things here, and
+        # they are asked for separately. Anything we do not recognise is tried
+        # as an account, which is what every URL used to be treated as.
+        collection = "video-channels" if CHANNEL_PATH.match(profile_url) else "accounts"
         try:
-            url = f'https://{self.webserver}/api/v1/accounts/{username}/videos'
+            url = f'https://{self.webserver}/api/v1/{collection}/{username}/videos'
             response = self._http.get(url)
             if response.status_code == 200:
                 return usable(
