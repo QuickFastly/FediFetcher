@@ -1,12 +1,23 @@
+from datetime import UTC, datetime
+
 import pytest
 
-from fedifetcher.api.mastodon import MastodonApi
+from fedifetcher.api.mastodon import MastodonApi, to_post
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
 
 
 @pytest.fixture
 def api(http):
     return MastodonApi("example.social", http)
+
+WHEN = "2026-01-01T00:00:00.000Z"
+
+
+def built(post: Post | None) -> Post:
+    """The builder drops what it cannot use; these tests are about the rest"""
+    assert post is not None
+    return post
 
 
 def test_it_claims_the_mastodon_flavour():
@@ -54,12 +65,13 @@ def test_user_id_reports_other_failures(api, http, reply):
 def test_user_posts_are_fetched_for_the_resolved_id(api, http, reply):
     http.get.side_effect = [
         reply(200, {"id": "1234"}),
-        reply(200, [{"url": "https://example.social/@someone/1"}]),
+        reply(200, [{"url": "https://example.social/@someone/1",
+                    "created_at": "2026-01-01T00:00:00.000Z"}]),
     ]
 
     posts = api.fetch_user_posts("someone", "https://example.social/@someone")
 
-    assert posts == [{"url": "https://example.social/@someone/1"}]
+    assert [post.url for post in posts] == ["https://example.social/@someone/1"]
     assert http.get.call_args[0][0] == (
         "https://example.social/api/v1/accounts/1234/statuses?limit=40"
     )
@@ -102,3 +114,70 @@ def test_context_is_empty_when_the_request_fails(api, http):
 def test_context_is_empty_when_the_body_makes_no_sense(api, http, reply):
     http.get.return_value = reply(200, {"unexpected": True})
     assert api.fetch_context_urls("9", "https://example.social/@a/9") == []
+
+
+def test_a_mastodon_status_keeps_what_it_was_given():
+    post = built(to_post({
+        "url": "https://remote.example/@a/1",
+        "uri": "https://remote.example/users/a/statuses/1",
+        "created_at": WHEN,
+        "visibility": "public",
+        "in_reply_to_id": "7",
+        "replies_count": 2,
+    }))
+
+    assert post.url == "https://remote.example/@a/1"
+    assert post.uri == "https://remote.example/users/a/statuses/1"
+    assert post.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+    assert post.is_public
+    assert post.in_reply_to_id == "7"
+    assert post.reply_count == 2
+
+
+@pytest.mark.parametrize(
+    "visibility,expected",
+    [("public", True), ("unlisted", True), ("private", False), ("direct", False)],
+)
+def test_only_posts_anyone_may_read_are_public(visibility, expected):
+    post = built(to_post({"url": "u", "created_at": WHEN, "visibility": visibility}))
+    assert post.is_public is expected
+
+
+def test_a_status_that_says_nothing_about_who_may_see_it_is_not_public():
+    assert built(to_post({"url": "u", "created_at": WHEN})).is_public is False
+
+
+def test_a_boost_carries_the_post_it_boosts():
+    post = built(to_post({
+        "url": "https://our.example/@a/1", "created_at": WHEN, "visibility": "public",
+        "reblog": {"url": "https://remote.example/@b/9", "created_at": WHEN,
+                   "visibility": "public"},
+    }))
+
+    assert post.is_boost
+    assert post.original.url == "https://remote.example/@b/9"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"created_at": WHEN},                    # nothing to address it by
+        {"url": "u"},                            # nothing to date it by
+        {"url": "u", "created_at": "not a date"},
+        {"url": "u", "created_at": None},
+    ],
+)
+def test_a_post_we_could_not_use_is_dropped(raw):
+    assert to_post(raw) is None
+
+
+def test_dropping_a_post_is_worth_saying_out_loud(caplog):
+    with caplog.at_level("DEBUG"):
+        to_post({"uri": "https://remote.example/1"})
+
+    assert "https://remote.example/1" in caplog.text
+
+
+def test_a_date_we_already_understand_is_left_alone():
+    when = datetime(2026, 6, 1, tzinfo=UTC)
+    assert built(to_post({"url": "u", "created_at": when})).created_at == when

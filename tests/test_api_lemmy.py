@@ -1,6 +1,7 @@
 import pytest
 
-from fedifetcher.api.lemmy import LemmyApi
+from fedifetcher.api.lemmy import LemmyApi, to_post
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
 
 
@@ -8,29 +9,39 @@ from fedifetcher.servers import ApiFlavour
 def api(http):
     return LemmyApi("lemmy.world", http)
 
+WHEN = "2026-01-01T00:00:00.000Z"
+
+
+def built(post: Post | None) -> Post:
+    """The builder drops what it cannot use; these tests are about the rest"""
+    assert post is not None
+    return post
+
 
 def test_it_claims_the_lemmy_flavour():
     assert LemmyApi.flavour is ApiFlavour.LEMMY
 
 
 def test_community_posts_are_read_from_the_community_endpoint(api, http, reply):
-    http.get.return_value = reply(200, {"posts": [{"post": {"ap_id": "https://lemmy.world/post/1"}}]})
+    http.get.return_value = reply(200, {"posts": [
+        {"post": {"ap_id": "https://lemmy.world/post/1", "published": "2026-01-01T00:00:00Z"}},
+    ]})
 
     posts = api.fetch_user_posts("news", "https://lemmy.world/c/news")
 
-    assert posts == [{"ap_id": "https://lemmy.world/post/1", "url": "https://lemmy.world/post/1"}]
+    assert [post.url for post in posts] == ["https://lemmy.world/post/1"]
     assert "community_name=news" in http.get.call_args[0][0]
 
 
 def test_account_posts_combine_posts_and_comments(api, http, reply):
     http.get.return_value = reply(200, {
-        "comments": [{"post": {"ap_id": "https://lemmy.world/comment/1"}}],
-        "posts": [{"post": {"ap_id": "https://lemmy.world/post/2"}}],
+        "comments": [{"post": {"ap_id": "https://lemmy.world/comment/1", "published": "2026-01-01T00:00:00Z"}}],
+        "posts": [{"post": {"ap_id": "https://lemmy.world/post/2", "published": "2026-01-01T00:00:00Z"}}],
     })
 
     posts = api.fetch_user_posts("someone", "https://lemmy.world/u/someone")
 
-    assert [p["url"] for p in posts] == [
+    assert [p.url for p in posts] == [
         "https://lemmy.world/comment/1",
         "https://lemmy.world/post/2",
     ]
@@ -94,3 +105,16 @@ def test_comment_context_gives_up_when_the_body_makes_no_sense(api, http, reply)
 def test_an_unrecognised_post_url_yields_no_context(api, http):
     assert api.fetch_context_urls("5", "https://lemmy.world/x/5") == []
     http.get.assert_not_called()
+
+
+def test_a_lemmy_post_is_named_by_its_activitypub_id():
+    post = built(to_post({"ap_id": "https://lemmy.example/post/1", "published": WHEN}))
+
+    assert post.url == "https://lemmy.example/post/1"
+    assert post.uri == "https://lemmy.example/post/1"
+    # Lemmy has nothing to hide: a community is readable or it is not
+    assert post.is_public
+
+
+def test_a_lemmy_post_without_an_id_is_dropped():
+    assert to_post({"published": WHEN}) is None

@@ -7,12 +7,36 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 
 from dateutil import parser
 
+from fedifetcher.posts import Post, parse_date, unusable, usable
 from fedifetcher.servers import ApiFlavour
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient
 
 logger = logging.getLogger("FediFetcher")
+
+# a status anyone is allowed to read
+PUBLIC = ("public", "unlisted")
+
+
+def to_post(raw: dict[str, Any]) -> Post | None:
+    """A status from the Mastodon API, which our own server also speaks"""
+    url = raw.get("url")
+    created_at = parse_date(raw.get("created_at"))
+    if url is None or created_at is None:
+        unusable("mastodon", raw.get("uri"))
+        return None
+
+    boosted = raw.get("reblog")
+    return Post(
+        url=url,
+        uri=raw.get("uri") or url,
+        created_at=created_at,
+        is_public=raw.get("visibility") in PUBLIC,
+        reblog=to_post(boosted) if boosted is not None else None,
+        in_reply_to_id=raw.get("in_reply_to_id"),
+        reply_count=raw.get("replies_count"),
+    )
 
 
 class MastodonApi:
@@ -51,9 +75,7 @@ class MastodonApi:
                 f"Error getting URL {url}. Status code: {response.status_code}"
             )
 
-    def fetch_user_posts(
-        self, username: str, profile_url: str
-    ) -> list[dict[str, Any]] | None:
+    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         try:
             user_id = self.user_id(username)
         except Exception as ex:
@@ -65,7 +87,7 @@ class MastodonApi:
             response = self._http.get(url)
 
             if(response.status_code == 200):
-                return cast("list[dict[str, Any]]", response.json())
+                return usable(to_post(raw) for raw in response.json())
             elif response.status_code == 404:
                 raise Exception(
                     f"User {username} was not found on server {self.webserver}"

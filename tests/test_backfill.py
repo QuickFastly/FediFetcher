@@ -13,6 +13,7 @@ from fedifetcher.backfill import (
 )
 from fedifetcher.config import Config
 from fedifetcher.state import TimestampedSet
+from tests.conftest import make_post
 
 
 def config_with(**settings: Any) -> Config:
@@ -33,8 +34,8 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts, state, home)
     known_followings = TimestampedSet()
 
     mock_get_posts.return_value = [
-        {"url": "https://user1.com/post1"},
-        {"url": "https://user1.com/post2"},
+        make_post(url="https://user1.com/post1"),
+        make_post(url="https://user1.com/post2"),
     ]
     mock_add_post.return_value = True
 
@@ -63,8 +64,8 @@ def test_add_user_posts_with_no_new_posts(mock_logger, mock_add_post, mock_get_p
     state.seen_urls.update(["https://user1.com/post1", "https://user1.com/post2"])
 
     mock_get_posts.return_value = [
-        {"url": "https://user1.com/post1"},
-        {"url": "https://user1.com/post2"},
+        make_post(url="https://user1.com/post1"),
+        make_post(url="https://user1.com/post2"),
     ]
     mock_add_post.return_value = True
 
@@ -85,12 +86,12 @@ def test_add_post_with_context_post_not_added(state, home, http):
     home.resolve.return_value = False
     config = Mock()
 
-    post = {"url": "http://example.com"}
+    post = make_post(url="http://example.com")
     result = backfill.add_post_with_context(
         post, home, http=http, config=config, state=state
     )
 
-    home.resolve.assert_called_once_with(post["url"])
+    home.resolve.assert_called_once_with(post.url)
     assert result is False
 
 
@@ -226,7 +227,7 @@ def test_a_server_we_cannot_talk_to_yields_nothing(state, http):
 
 def test_posts_come_from_the_client_for_that_server(state, http):
     client = Mock()
-    client.fetch_user_posts.return_value = [{"url": "https://remote.example/@someone/1"}]
+    client.fetch_user_posts.return_value = [make_post()]
 
     with patch.object(backfill, "get_server_info", return_value=Mock()), \
          patch.object(backfill, "client_for", return_value=client):
@@ -234,7 +235,7 @@ def test_posts_come_from_the_client_for_that_server(state, http):
             account(), TimestampedSet(), "our.example", http=http, state=state
         )
 
-    assert posts == [{"url": "https://remote.example/@someone/1"}]
+    assert posts == [make_post()]
     client.fetch_user_posts.assert_called_once_with(
         "someone", "https://remote.example/@someone"
     )
@@ -245,7 +246,7 @@ def test_a_post_the_server_refuses_is_reported_as_not_added(state, home, http):
     config = config_with(backfill_with_context=True)
 
     added = backfill.add_post_with_context(
-        {"url": "https://remote.example/@a/1"}, home, http=http, config=config, state=state
+        make_post(url="https://remote.example/@a/1"), home, http=http, config=config, state=state
     )
 
     assert added is False
@@ -257,7 +258,7 @@ def test_an_added_post_is_remembered(state, home, http):
     config = config_with(backfill_with_context=False)
 
     added = backfill.add_post_with_context(
-        {"url": "https://remote.example/@a/1"}, home, http=http, config=config, state=state
+        make_post(url="https://remote.example/@a/1"), home, http=http, config=config, state=state
     )
 
     assert added is True
@@ -267,7 +268,7 @@ def test_an_added_post_is_remembered(state, home, http):
 def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
     home.resolve.return_value = True
     config = config_with(backfill_with_context=True)
-    post = {"url": "https://remote.example/@a/1", "replies_count": 2}
+    post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
     with patch.object(backfill, "parse_url", return_value=("remote.example", "1")), \
          patch.object(backfill, "get_all_known_context_urls", return_value=["u"]) as gather, \
@@ -281,7 +282,7 @@ def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
 def test_replies_are_left_alone_when_context_is_not_wanted(state, home, http):
     home.resolve.return_value = True
     config = config_with(backfill_with_context=False)
-    post = {"url": "https://remote.example/@a/1", "replies_count": 2}
+    post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
     with patch.object(backfill, "get_all_known_context_urls") as gather:
         backfill.add_post_with_context(post, home, http=http, config=config, state=state)
@@ -292,7 +293,7 @@ def test_replies_are_left_alone_when_context_is_not_wanted(state, home, http):
 def test_a_post_whose_url_we_cannot_parse_is_still_added(state, home, http):
     home.resolve.return_value = True
     config = config_with(backfill_with_context=True)
-    post = {"url": "https://remote.example/@a/1", "replies_count": 2}
+    post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
     with patch.object(backfill, "parse_url", return_value=None), \
          patch.object(backfill, "get_all_known_context_urls") as gather:
@@ -308,7 +309,10 @@ def test_a_user_is_only_marked_known_when_every_post_succeeded(state, home, http
     caplog.set_level(logging.INFO)
     config = Mock()
     target = TimestampedSet()
-    posts = [{"url": "https://remote.example/@a/1"}, {"url": "https://remote.example/@a/2"}]
+    posts = [
+        make_post(url="https://remote.example/@a/1"),
+        make_post(url="https://remote.example/@a/2"),
+    ]
 
     with patch.object(backfill, "get_user_posts", return_value=posts), \
          patch.object(backfill, "add_post_with_context", side_effect=[True, False]):
@@ -322,10 +326,10 @@ def test_a_user_is_only_marked_known_when_every_post_succeeded(state, home, http
 
 
 def test_reblogs_and_renotes_are_not_added(state, home, http):
+    # a Mastodon boost and a Misskey renote arrive as the same thing now
     posts = [
-        {"url": "https://remote.example/@a/1", "reblog": {"url": "x"}},
-        {"url": "https://remote.example/@a/2", "renoteId": "7"},
-        {"reblog": None},
+        make_post(url="https://remote.example/@a/1", reblog=make_post(url="x")),
+        make_post(url="https://remote.example/@a/2", reblog=make_post(url="y")),
     ]
 
     with patch.object(backfill, "get_user_posts", return_value=posts), \

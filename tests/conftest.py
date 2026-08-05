@@ -1,8 +1,22 @@
+from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
+from fedifetcher.posts import Post
 from fedifetcher.store import State
+
+
+def make_post(**overrides: Any) -> Post:
+    """A Post that is fine in every way the test does not care about"""
+    fields: dict[str, Any] = {
+        "url": "https://remote.example/@someone/1",
+        "uri": "https://remote.example/@someone/1",
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "is_public": True,
+    }
+    return Post(**{**fields, **overrides})
 
 
 @pytest.fixture

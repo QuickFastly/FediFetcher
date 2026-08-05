@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
 
 from fedifetcher.api.lemmy import LemmyApi
 from fedifetcher.api.mastodon import MastodonApi
 from fedifetcher.api.misskey import MisskeyApi
 from fedifetcher.api.peertube import PeerTubeApi
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour, ServerInfo
 
 if TYPE_CHECKING:
@@ -21,9 +22,7 @@ class FediverseApi(Protocol):
 
     flavour: ClassVar[ApiFlavour]
 
-    def fetch_user_posts(
-        self, username: str, profile_url: str
-    ) -> list[dict[str, Any]] | None:
+    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         """Recent posts by an account, or None if they could not be read"""
         ...
 

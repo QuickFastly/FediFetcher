@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from fedifetcher.api import client_for
 from fedifetcher.context import add_context_urls, get_all_known_context_urls
+from fedifetcher.posts import Post
 from fedifetcher.servers import get_server_info
 from fedifetcher.urls import parse_url, parse_user_url
 
@@ -26,13 +27,6 @@ We read acct, url, note, indexable and discoverable. The last three are
 how an account opts out of being backfilled, and any of them may be absent.
 """
 
-Post = dict[str, Any]
-"""A post by an account we are backfilling, as its server gave it to us.
-
-We read url, reblog, renoteId, replies_count and in_reply_to_id. Which of
-those exist depends on the software: reblog is Mastodon's, renoteId is
-Misskey's, and we check for both rather than ask what we are talking to.
-"""
 
 
 def filter_known_users(
@@ -87,11 +81,11 @@ def get_user_posts(
 def add_post_with_context(
     post: Post, home: HomeServer, *, http: HttpClient, config: Config, state: State
 ) -> bool:
-    added = home.resolve(post['url'])
+    added = home.resolve(post.url)
     if added is True:
-        state.seen_urls.add(post['url'])
-        if ('replies_count' in post or 'in_reply_to_id' in post) and config.backfill_with_context:
-            parsed = parse_url(post['url'], state.parsed_urls, http)
+        state.seen_urls.add(post.url)
+        if post.may_have_context and config.backfill_with_context:
+            parsed = parse_url(post.url, state.parsed_urls, http)
             if parsed is None:
                 return True
             known_context_urls = get_all_known_context_urls(home.server, [post], http=http, state=state)
@@ -117,10 +111,10 @@ def add_user_posts(
                 count = 0
                 failed = 0
                 for post in posts:
-                    if post.get('reblog') is None and post.get('renoteId') is None and post.get('url') is not None and post.get('url') not in state.seen_urls:
+                    if not post.is_boost and post.url not in state.seen_urls:
                         added = add_post_with_context(post, home, http=http, config=config, state=state)
                         if added is True:
-                            state.seen_urls.add(post['url'])
+                            state.seen_urls.add(post.url)
                             count += 1
                         else:
                             failed += 1

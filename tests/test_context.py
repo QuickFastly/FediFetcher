@@ -5,8 +5,9 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from fedifetcher import context
-from fedifetcher.context import Toot, add_context_urls, get_toot_context
+from fedifetcher.context import add_context_urls, get_toot_context
 from fedifetcher.urls import PostRef
+from tests.conftest import make_post
 
 
 @pytest.fixture
@@ -21,25 +22,14 @@ def userName():
 
 @patch("fedifetcher.context.logger")
 def test_toot_context_can_be_fetched_public(mock_logger):
-    toot = {"visibility": "public", "uri": "sample_uri"}
-    result = context.toot_context_can_be_fetched(toot)
-    assert result is True
-    mock_logger.debug.assert_not_called()
-
-
-@patch("fedifetcher.context.logger")
-def test_toot_context_can_be_fetched_unlisted(mock_logger):
-    toot = {"visibility": "unlisted", "uri": "sample_uri"}
-    result = context.toot_context_can_be_fetched(toot)
-    assert result is True
+    assert context.toot_context_can_be_fetched(make_post()) is True
     mock_logger.debug.assert_not_called()
 
 
 @patch("fedifetcher.context.logger")
 def test_toot_context_can_be_fetched_private(mock_logger):
-    toot = {"visibility": "private", "uri": "sample_uri"}
-    result = context.toot_context_can_be_fetched(toot)
-    assert result is False
+    toot = make_post(uri="sample_uri", is_public=False)
+    assert context.toot_context_can_be_fetched(toot) is False
     mock_logger.debug.assert_called_once_with(
         "Cannot fetch context of private toot sample_uri"
     )
@@ -64,17 +54,11 @@ recently_checked_context = {"existing_uri": toot_with_existing_uri}
 
 @patch("fedifetcher.context.get_toot_context")
 @patch("fedifetcher.context.parse_url")
-@patch("fedifetcher.context.toot_has_parseable_url")
-def test_get_all_known_context_urls(
-    toot_has_parseable_url, parse_url, get_toot_context, state, http
-):
-    reply_toots: list[Toot] = [
-        {"url": "test_url_1", "reblog": None, "uri": "test_uri_1",
-         "visibility": "public", "created_at": "2026-01-01T00:00:00+00:00"},
-        {"url": "test_url_2", "reblog": {"url": "reblog_url_2"}, "uri": "test_uri_2",
-         "visibility": "public", "created_at": "2026-01-01T00:00:00+00:00"},
+def test_get_all_known_context_urls(parse_url, get_toot_context, state, http):
+    reply_toots = [
+        make_post(url="test_url_1", uri="test_uri_1"),
+        make_post(url="test_url_2", uri="test_uri_2"),
     ]
-    toot_has_parseable_url.return_value = True
     parse_url.return_value = ("parsed_host", "parsed_id")
     get_toot_context.return_value = ["context_item_1", "context_item_2"]
 
@@ -83,29 +67,12 @@ def test_get_all_known_context_urls(
     )
 
     assert urls == {"context_item_1", "context_item_2"}
-    assert toot_has_parseable_url.call_count == 2
     assert get_toot_context.call_count == 2
     # both posts are now remembered, so a second pass would not refetch them
     assert "test_uri_1" in state.recently_checked_context
     assert not context.get_all_known_context_urls(
         "test_server", reply_toots, http=http, state=state
     )
-
-
-def test_toot_has_parseable_url_with_parseable_url(state):
-    http = Mock()
-    toot = {"url": "http://test.com", "reblog": None}
-    with patch("fedifetcher.context.parse_url", return_value="something") as mock_parse_url:
-        assert context.toot_has_parseable_url(toot, http=http, state=state)
-        mock_parse_url.assert_called_once_with("http://test.com", state.parsed_urls, http)
-
-
-def test_toot_has_parseable_url_with_unparseable_url(state):
-    http = Mock()
-    toot = {"url": "http://test.com", "reblog": None}
-    with patch("fedifetcher.context.parse_url", return_value=None) as mock_parse_url:
-        assert not context.toot_has_parseable_url(toot, http=http, state=state)
-        mock_parse_url.assert_called_once_with("http://test.com", state.parsed_urls, http)
 
 
 def test_get_replied_toot_server_id_no_mentions(state):
@@ -236,11 +203,10 @@ def public_toot(uri="https://remote.example/@a/1", **extra):
 
 
 def test_a_failed_context_lookup_is_reported(state, http, caplog):
-    with patch.object(context, "toot_has_parseable_url", return_value=True), \
-         patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(context, "parse_url", return_value=("remote.example", "1")), \
          patch.object(context, "get_toot_context", return_value=None):
         urls = context.get_all_known_context_urls(
-            "our.example", [public_toot()], http=http, state=state
+            "our.example", [make_post()], http=http, state=state
         )
 
     assert urls == set()
@@ -251,21 +217,19 @@ def test_posts_already_on_our_own_server_are_not_returned(state, http):
     ours = "https://our.example/@a/2"
     theirs = "https://remote.example/@b/3"
 
-    with patch.object(context, "toot_has_parseable_url", return_value=True), \
-         patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(context, "parse_url", return_value=("remote.example", "1")), \
          patch.object(context, "get_toot_context", return_value=[ours, theirs]):
         urls = context.get_all_known_context_urls(
-            "our.example", [public_toot()], http=http, state=state
+            "our.example", [make_post()], http=http, state=state
         )
 
     assert urls == {theirs}
 
 
 def test_private_posts_are_not_asked_about(state, http):
-    private = public_toot(visibility="private")
+    private = make_post(is_public=False)
 
-    with patch.object(context, "toot_has_parseable_url", return_value=True), \
-         patch.object(context, "parse_url", return_value=("remote.example", "1")), \
+    with patch.object(context, "parse_url", return_value=("remote.example", "1")), \
          patch.object(context, "get_toot_context") as fetch:
         context.get_all_known_context_urls(
             "our.example", [private], http=http, state=state
@@ -275,20 +239,23 @@ def test_private_posts_are_not_asked_about(state, http):
 
 
 def test_posts_we_cannot_parse_are_skipped(state, http):
-    with patch.object(context, "toot_has_parseable_url", return_value=False), \
+    with patch.object(context, "parse_url", return_value=None), \
          patch.object(context, "get_toot_context") as fetch:
         context.get_all_known_context_urls(
-            "our.example", [public_toot()], http=http, state=state
+            "our.example", [make_post()], http=http, state=state
         )
 
     fetch.assert_not_called()
 
 
 def test_a_reblog_is_followed_to_the_post_it_boosts(state, http):
-    reblog = public_toot(reblog={"url": "https://remote.example/@original/9"})
+    boost = make_post(reblog=make_post(url="https://remote.example/@original/9"))
 
-    with patch.object(context, "parse_url", return_value=("remote.example", "9")) as parse:
-        assert context.toot_has_parseable_url(reblog, http=http, state=state)
+    with patch.object(context, "parse_url", return_value=("remote.example", "9")) as parse, \
+         patch.object(context, "get_toot_context", return_value=[]):
+        context.get_all_known_context_urls(
+            "our.example", [boost], http=http, state=state
+        )
 
     assert parse.call_args[0][0] == "https://remote.example/@original/9"
 

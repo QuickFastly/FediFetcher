@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from dateutil import parser
 
+from fedifetcher.api import mastodon
 from fedifetcher.api.mastodon import HomeServer
 from fedifetcher.backfill import add_user_posts, filter_known_users
 from fedifetcher.config import Config
@@ -19,6 +20,7 @@ from fedifetcher.context import (
     get_all_replied_toot_server_ids,
 )
 from fedifetcher.http import HttpClient
+from fedifetcher.posts import usable
 from fedifetcher.store import State
 
 if TYPE_CHECKING:
@@ -91,7 +93,9 @@ def fetch_timeline_context(
     config: Config,
     state: State,
 ) -> None:
-    known_context_urls = get_all_known_context_urls(config.server, timeline_posts, http=http, state=state)
+    known_context_urls = get_all_known_context_urls(
+        config.server, usable(map(mastodon.to_post, timeline_posts)), http=http, state=state
+    )
     add_context_urls(home, known_context_urls, state=state)
 
     # Backfill any post authors, and any mentioned users
@@ -140,7 +144,8 @@ def fetch_reply_context(ctx: Context) -> None:
         ctx.home, user_ids, ctx.config.reply_interval_in_hours, state=ctx.state
     )
     known_context_urls = get_all_known_context_urls(
-        ctx.config.server, reply_toots, http=ctx.http, state=ctx.state
+        ctx.config.server, usable(map(mastodon.to_post, reply_toots)),
+        http=ctx.http, state=ctx.state
     )
     ctx.state.seen_urls.update(known_context_urls)
     replied_toot_ids = get_all_replied_toot_server_ids(
@@ -212,7 +217,7 @@ def fetch_favourite_context(ctx: Context) -> None:
 
 def _pull_context_for(ctx: Context, posts: list[Toot]) -> None:
     known_context_urls = get_all_known_context_urls(
-        ctx.config.server, posts, http=ctx.http, state=ctx.state
+        ctx.config.server, usable(map(mastodon.to_post, posts)), http=ctx.http, state=ctx.state
     )
     add_context_urls(ctx.home, known_context_urls, state=ctx.state)
 

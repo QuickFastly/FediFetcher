@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from fedifetcher.api import client_for
+from fedifetcher.posts import Post
 from fedifetcher.servers import get_server_info
 from fedifetcher.urls import PostRef, parse_url
 
@@ -18,56 +19,48 @@ if TYPE_CHECKING:
 logger = logging.getLogger("FediFetcher")
 
 Toot = dict[str, Any]
-"""A post, as the server gave it to us.
+"""A post from our own server, still in the shape it arrived in.
 
-We read url, uri, visibility, created_at, reblog, mentions, account,
-in_reply_to_id and in_reply_to_account_id. A boosted post carries the
-original under reblog, so url and mentions are read from there instead.
+Only the paths that chase who a post replied to still read these: they need
+in_reply_to_id, in_reply_to_account_id and mentions, and mentions are
+accounts, which have not been given a shape of their own yet.
 """
 
 RepliedToot = tuple[str, PostRef]
 """A post that was replied to: the URL we followed, and where it landed."""
 
 
-def toot_context_can_be_fetched(toot: Toot) -> bool:
-    fetchable = toot["visibility"] in ["public", "unlisted"]
-    if not fetchable:
-        logger.debug(f"Cannot fetch context of private toot {toot['uri']}")
-    return fetchable
+def toot_context_can_be_fetched(toot: Post) -> bool:
+    if not toot.is_public:
+        logger.debug(f"Cannot fetch context of private toot {toot.uri}")
+    return toot.is_public
 
 
 def get_all_known_context_urls(
-    server: str, reply_toots: Iterable[Toot], *, http: HttpClient, state: State
+    server: str, reply_toots: Iterable[Post], *, http: HttpClient, state: State
 ) -> set[str]:
     """get the context toots of the given toots from their original server"""
     known_context_urls: set[str] = set()
 
     for toot in reply_toots:
-        if toot_has_parseable_url(toot, http=http, state=state):
-            url = toot["url"] if toot["reblog"] is None else toot["reblog"]["url"]
-            parsed_url = parse_url(url, state.parsed_urls, http)
-            if parsed_url is None:
-                continue
-            if toot_context_can_be_fetched(toot) and state.recently_checked_context.should_fetch(toot['uri'], toot['created_at']):
-                state.recently_checked_context.mark_fetched(toot['uri'], toot['created_at'])
-                context = get_toot_context(parsed_url[0], parsed_url[1], url, http=http, state=state)
-                if context is not None:
-                    for item in context:
-                        known_context_urls.add(item)
-                else:
-                    logger.error(f"Error getting context for toot {url}")
+        # a boost is only ever a pointer: the replies are on the original
+        url = toot.original.url
+        parsed_url = parse_url(url, state.parsed_urls, http)
+        if parsed_url is None:
+            continue
+        if toot_context_can_be_fetched(toot) and state.recently_checked_context.should_fetch(toot.uri, toot.created_at):
+            state.recently_checked_context.mark_fetched(toot.uri, toot.created_at)
+            context = get_toot_context(parsed_url[0], parsed_url[1], url, http=http, state=state)
+            if context is not None:
+                for item in context:
+                    known_context_urls.add(item)
+            else:
+                logger.error(f"Error getting context for toot {url}")
 
     known_context_urls = set(filter(lambda url: not url.startswith(f"https://{server}/"), known_context_urls))
     logger.info(f"Found {len(known_context_urls)} known context toots")
 
     return known_context_urls
-
-
-def toot_has_parseable_url(toot: Toot, *, http: HttpClient, state: State) -> bool:
-    parsed = parse_url(toot["url"] if toot["reblog"] is None else toot["reblog"]["url"], state.parsed_urls, http)
-    if(parsed is None) :
-        return False
-    return True
 
 
 def get_all_replied_toot_server_ids(

@@ -4,6 +4,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from fedifetcher.posts import Post, parse_date, unusable, usable
 from fedifetcher.servers import ApiFlavour
 
 if TYPE_CHECKING:
@@ -15,6 +16,18 @@ COMMUNITY_PATH = re.compile(r"^https://[^/]+/c/")
 USER_PATH = re.compile(r"^https://[^/]+/u/")
 
 
+def to_post(raw: dict[str, Any]) -> Post | None:
+    """A Lemmy post or comment, which names itself by its ActivityPub id"""
+    ap_id = raw.get("ap_id")
+    created_at = parse_date(raw.get("published"))
+    if ap_id is None or created_at is None:
+        unusable("lemmy", raw.get("id"))
+        return None
+
+    # Lemmy has no visibility setting: a community is readable or it is not
+    return Post(url=ap_id, uri=ap_id, created_at=created_at, is_public=True)
+
+
 class LemmyApi:
     """Lemmy, whose URLs say whether they name a community, user, post or comment"""
 
@@ -24,9 +37,7 @@ class LemmyApi:
         self.webserver = webserver
         self._http = http
 
-    def fetch_user_posts(
-        self, username: str, profile_url: str
-    ) -> list[dict[str, Any]] | None:
+    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         if COMMUNITY_PATH.match(profile_url):
             return self._fetch_community_posts(username)
         if USER_PATH.match(profile_url):
@@ -35,32 +46,30 @@ class LemmyApi:
         logger.error(f"Unknown Lemmy profile URL type {profile_url}")
         return None
 
-    def _fetch_community_posts(self, username: str) -> list[dict[str, Any]] | None:
+    def _fetch_community_posts(self, username: str) -> list[Post] | None:
         try:
             url = f"https://{self.webserver}/api/v3/post/list?community_name={username}&sort=New&limit=50"
             response = self._http.get(url)
 
             if(response.status_code == 200):
-                posts = [post['post'] for post in response.json()['posts']]
-                for post in posts:
-                    post['url'] = post['ap_id']
-                return posts
+                return usable(
+                    to_post(post['post']) for post in response.json()['posts']
+                )
         except Exception as ex:
             logger.error(f"Error getting community posts for community {username}: {ex}")
         return None
 
-    def _fetch_account_posts(self, username: str) -> list[dict[str, Any]] | None:
+    def _fetch_account_posts(self, username: str) -> list[Post] | None:
         try:
             url = f"https://{self.webserver}/api/v3/user?username={username}&sort=New&limit=50"
             response = self._http.get(url)
 
             if(response.status_code == 200):
-                comments = [post['post'] for post in response.json()['comments']]
-                posts = [post['post'] for post in response.json()['posts']]
-                all_posts = comments + posts
-                for post in all_posts:
-                    post['url'] = post['ap_id']
-                return all_posts
+                body = response.json()
+                return usable(
+                    to_post(entry['post'])
+                    for entry in body['comments'] + body['posts']
+                )
         except Exception as ex:
             logger.error(f"Error getting user posts for user {username}: {ex}")
         return None

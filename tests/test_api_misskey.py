@@ -1,12 +1,21 @@
 import pytest
 
-from fedifetcher.api.misskey import MisskeyApi
+from fedifetcher.api.misskey import MisskeyApi, to_post
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
 
 
 @pytest.fixture
 def api(http):
     return MisskeyApi("misskey.example", http)
+
+WHEN = "2026-01-01T00:00:00.000Z"
+
+
+def built(post: Post | None) -> Post:
+    """The builder drops what it cannot use; these tests are about the rest"""
+    assert post is not None
+    return post
 
 
 def test_it_claims_the_misskey_flavour():
@@ -16,24 +25,25 @@ def test_it_claims_the_misskey_flavour():
 def test_user_posts_are_fetched_for_the_local_account(api, http, reply):
     http.post.side_effect = [
         reply(200, [{"id": "remote", "host": "elsewhere"}, {"id": "local", "host": None}]),
-        reply(200, [{"id": "note1"}]),
+        reply(200, [{"id": "note1", "createdAt": "2026-01-01T00:00:00Z"}]),
     ]
 
     notes = api.fetch_user_posts("someone", "https://misskey.example/@someone")
 
-    assert notes == [{"id": "note1", "url": "https://misskey.example/notes/note1"}]
+    assert [note.url for note in notes] == ["https://misskey.example/notes/note1"]
     assert http.post.call_args_list[1][0][1] == {"userId": "local", "limit": 40}
 
 
 def test_a_note_that_knows_its_url_keeps_it(api, http, reply):
     http.post.side_effect = [
         reply(200, [{"id": "local", "host": None}]),
-        reply(200, [{"id": "note1", "url": "https://elsewhere/notes/note1"}]),
+        reply(200, [{"id": "note1", "url": "https://elsewhere/notes/note1",
+                    "createdAt": "2026-01-01T00:00:00Z"}]),
     ]
 
     notes = api.fetch_user_posts("someone", "https://misskey.example/@someone")
 
-    assert notes[0]["url"] == "https://elsewhere/notes/note1"
+    assert notes[0].url == "https://elsewhere/notes/note1"
 
 
 def test_user_posts_give_up_when_the_account_is_not_found(api, http, reply):
@@ -81,3 +91,55 @@ def test_context_is_empty_when_the_request_fails(api, http):
 def test_context_is_empty_when_the_body_makes_no_sense(api, http, reply):
     http.post.return_value = reply(200, None)
     assert api.fetch_context_urls("note1", "https://misskey.example/notes/note1") == []
+
+
+def test_a_misskey_note_is_given_a_url_when_it_has_none():
+    post = built(to_post(
+        {"id": "note1", "createdAt": WHEN, "visibility": "public"}, "misskey.example"
+    ))
+
+    assert post.url == "https://misskey.example/notes/note1"
+
+
+def test_a_misskey_note_that_knows_its_own_url_keeps_it():
+    post = built(to_post(
+        {"id": "note1", "url": "https://elsewhere/notes/1", "createdAt": WHEN},
+        "misskey.example",
+    ))
+
+    assert post.url == "https://elsewhere/notes/1"
+
+
+@pytest.mark.parametrize(
+    "visibility,expected",
+    [("public", True), ("home", True), ("followers", False), ("specified", False)],
+)
+def test_a_misskey_note_is_public_when_it_is_not_for_a_chosen_few(visibility, expected):
+    post = built(to_post(
+        {"id": "1", "createdAt": WHEN, "visibility": visibility}, "misskey.example"
+    ))
+    assert post.is_public is expected
+
+
+def test_a_renote_is_a_boost_by_another_name():
+    post = built(to_post({
+        "id": "1", "createdAt": WHEN, "visibility": "public",
+        "renote": {"id": "9", "createdAt": WHEN, "visibility": "public"},
+    }, "misskey.example"))
+
+    assert post.is_boost
+    assert post.original.url == "https://misskey.example/notes/9"
+
+
+def test_a_misskey_note_says_what_it_replied_to_in_its_own_words():
+    post = built(to_post(
+        {"id": "1", "createdAt": WHEN, "replyId": "7", "repliesCount": 3},
+        "misskey.example",
+    ))
+
+    assert post.in_reply_to_id == "7"
+    assert post.reply_count == 3
+
+
+def test_a_misskey_note_without_an_id_is_dropped():
+    assert to_post({"createdAt": WHEN}, "misskey.example") is None

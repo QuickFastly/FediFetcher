@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from fedifetcher import tasks
+from fedifetcher.api.mastodon import to_post
 from fedifetcher.store import State
 
 
@@ -111,15 +112,26 @@ def test_tasks_run_in_the_documented_order():
 
 def test_bookmarks_pull_context_for_what_they_find():
     ctx = context_for(max_bookmarks=5)
-    ctx.home.bookmarks.return_value = ["a post"]
+    bookmark = raw_status()
+    ctx.home.bookmarks.return_value = [bookmark]
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=["url"]) as gather, \
          patch.object(tasks, "add_context_urls") as add:
         tasks.fetch_bookmark_context(ctx)
 
     ctx.home.bookmarks.assert_called_once_with(5)
-    gather.assert_called_once_with(ctx.config.server, ["a post"], http=ctx.http, state=ctx.state)
+    gather.assert_called_once_with(
+        ctx.config.server, [to_post(bookmark)], http=ctx.http, state=ctx.state
+    )
     add.assert_called_once_with(ctx.home, ["url"], state=ctx.state)
+
+
+def raw_status(url="https://our.example/@a/1"):
+    """A post in the shape our own server sends, before it becomes a Post"""
+    return {
+        "url": url, "uri": url, "visibility": "public",
+        "created_at": "2026-01-01T00:00:00.000Z",
+    }
 
 
 def real_context(**settings):
@@ -296,7 +308,7 @@ def test_reply_context_walks_from_our_replies_to_their_originals():
     ctx = real_context(reply_interval_in_hours=24)
     ctx.home.active_user_ids.return_value = ["1"]
 
-    with patch.object(tasks, "get_all_reply_toots", return_value=["a reply"]), \
+    with patch.object(tasks, "get_all_reply_toots", return_value=[raw_status()]), \
          patch.object(tasks, "get_all_known_context_urls", return_value=["known"]), \
          patch.object(tasks, "get_all_replied_toot_server_ids", return_value=["ref"]), \
          patch.object(tasks, "get_all_context_urls", return_value=["ctx"]) as context_urls, \
@@ -355,7 +367,7 @@ def test_accounts_we_already_know_are_filtered_out_before_backfilling():
 
 def test_favourites_pull_context_for_what_they_find():
     ctx = real_context(max_favourites=5)
-    ctx.home.favourites.return_value = ["a post"]
+    ctx.home.favourites.return_value = [raw_status()]
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=["url"]), \
          patch.object(tasks, "add_context_urls") as add:
