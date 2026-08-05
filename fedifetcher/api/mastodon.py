@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 
 from dateutil import parser
 
-from fedifetcher.posts import Post, parse_date, unusable, usable
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
+from fedifetcher.translate import parse_date, unusable, usable
 from fedifetcher.users import User
 
 if TYPE_CHECKING:

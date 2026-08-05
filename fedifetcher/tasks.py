@@ -20,8 +20,8 @@ from fedifetcher.context import (
     get_all_replied_toot_server_ids,
 )
 from fedifetcher.http import HttpClient
-from fedifetcher.posts import usable
 from fedifetcher.store import State
+from fedifetcher.translate import usable
 from fedifetcher.users import User
 
 if TYPE_CHECKING:

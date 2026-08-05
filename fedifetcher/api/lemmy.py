@@ -4,8 +4,9 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from fedifetcher.posts import Post, parse_date, unusable, usable
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
+from fedifetcher.translate import parse_date, unusable, usable
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient

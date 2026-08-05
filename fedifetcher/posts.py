@@ -1,16 +1,7 @@
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeVar
-
-from dateutil import parser
-
-logger = logging.getLogger("FediFetcher")
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,25 +35,3 @@ class Post:
     def may_have_context(self) -> bool:
         """Whether the server said anything suggesting this post has replies"""
         return self.in_reply_to_id is not None or self.reply_count is not None
-
-
-def usable(things: Iterable[T | None]) -> list[T]:
-    """Keep what we could make sense of, and forget the rest"""
-    return [thing for thing in things if thing is not None]
-
-
-def parse_date(value: Any) -> datetime | None:
-    """Read whatever a server calls a date, or admit we could not"""
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return parser.parse(value)
-    except (ValueError, OverflowError):
-        return None
-
-
-def unusable(flavour: str, identifier: Any) -> None:
-    """A post we cannot address or date is one we can do nothing with"""
-    logger.debug(f"Skipping a {flavour} post without a URL or a date: {identifier}")
