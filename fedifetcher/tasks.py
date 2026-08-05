@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from dateutil import parser
@@ -49,7 +49,9 @@ def get_all_reply_toots(
     state: State,
 ) -> list[Toot]:
     """get all replies to other users by the given users in the last day"""
-    replies_since = datetime.now() - timedelta(hours=reply_interval_hours)
+    # a post's date is UTC, so the window has to be measured in UTC too: local
+    # time here quietly shortened the interval east of UTC and lengthened it west
+    replies_since = datetime.now(UTC) - timedelta(hours=reply_interval_hours)
     reply_toots = list(
         itertools.chain.from_iterable(
             get_reply_toots(user_id, home, replies_since, state=state)
@@ -78,7 +80,7 @@ def get_reply_toots(
         if toot["in_reply_to_id"] is not None
         and toot["url"] not in state.seen_urls
         and datetime.strptime(toot["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
-        > reply_since
+        .replace(tzinfo=UTC) > reply_since
     ]
     for toot in toots:
         logger.debug(f"Found reply toot: {toot['url']}")

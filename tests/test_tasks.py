@@ -157,7 +157,7 @@ def test_only_replies_count_as_reply_toots():
         {"url": "https://our.example/@a/2", "in_reply_to_id": None, "created_at": RECENT},
     ]
 
-    toots = tasks.get_reply_toots("1", ctx.home, datetime.now() - timedelta(days=1), state=ctx.state)
+    toots = tasks.get_reply_toots("1", ctx.home, datetime.now(UTC) - timedelta(days=1), state=ctx.state)
 
     assert [t["url"] for t in toots] == ["https://our.example/@a/1"]
 
@@ -166,7 +166,7 @@ def test_replies_older_than_the_window_are_ignored():
     ctx = real_context()
     ctx.home.account_statuses.return_value = [reply("https://our.example/@a/1", OLD)]
 
-    toots = tasks.get_reply_toots("1", ctx.home, datetime.now() - timedelta(days=1), state=ctx.state)
+    toots = tasks.get_reply_toots("1", ctx.home, datetime.now(UTC) - timedelta(days=1), state=ctx.state)
 
     assert toots == []
 
@@ -176,9 +176,21 @@ def test_replies_we_have_already_seen_are_ignored():
     ctx.state.seen_urls.add("https://our.example/@a/1")
     ctx.home.account_statuses.return_value = [reply("https://our.example/@a/1", RECENT)]
 
-    toots = tasks.get_reply_toots("1", ctx.home, datetime.now() - timedelta(days=1), state=ctx.state)
+    toots = tasks.get_reply_toots("1", ctx.home, datetime.now(UTC) - timedelta(days=1), state=ctx.state)
 
     assert toots == []
+
+
+def test_the_reply_window_is_measured_in_utc():
+    """A naive local cutoff silently shortened the interval east of UTC"""
+    ctx = real_context()
+
+    with patch.object(tasks, "get_reply_toots", return_value=[]) as fetch:
+        tasks.get_all_reply_toots(ctx.home, ["1"], 24, state=ctx.state)
+
+    since = fetch.call_args[0][2]
+    assert since.tzinfo is not None
+    assert abs(datetime.now(UTC) - timedelta(hours=24) - since) < timedelta(seconds=5)
 
 
 def test_one_users_failure_does_not_stop_the_others(caplog):
