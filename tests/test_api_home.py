@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from fedifetcher.api.mastodon import HomeServer, get_paginated, report_mastodon_error
+from tests.conftest import make_user
 
 
 @pytest.fixture
@@ -80,19 +81,22 @@ def test_a_missing_scope_is_named_when_known():
 
 def test_notifications_are_reduced_to_distinct_accounts(home, http):
     now = datetime.now(UTC)
-    account = {"acct": "someone@example.social"}
+    account = {"acct": "someone@example.social", "url": "https://example.social/@someone"}
     http.get.return_value = page([
         {"created_at": now.isoformat(), "account": account},
         {"created_at": now.isoformat(), "account": account},
     ])
 
-    assert home.notification_accounts(now - timedelta(hours=1)) == [account]
+    assert home.notification_accounts(now - timedelta(hours=1)) == [
+        make_user(acct="someone@example.social", url="https://example.social/@someone")
+    ]
 
 
 def test_notifications_older_than_the_cutoff_are_ignored(home, http):
     now = datetime.now(UTC)
     http.get.return_value = page([
-        {"created_at": (now - timedelta(days=2)).isoformat(), "account": {"acct": "old"}},
+        {"created_at": (now - timedelta(days=2)).isoformat(),
+         "account": {"acct": "old", "url": "https://example.social/@old"}},
     ])
 
     assert home.notification_accounts(now - timedelta(hours=1)) == []

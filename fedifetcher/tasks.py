@@ -22,11 +22,11 @@ from fedifetcher.context import (
 from fedifetcher.http import HttpClient
 from fedifetcher.posts import usable
 from fedifetcher.store import State
+from fedifetcher.users import User
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from fedifetcher.backfill import User
 
 logger = logging.getLogger("FediFetcher")
 
@@ -106,19 +106,22 @@ def fetch_timeline_context(
             these_users: list[User] = []
             toot_created_at = parser.parse(toot['created_at'])
             if len(mentioned_users) < 10 or (toot_created_at > cut_off and len(mentioned_users) < 30):
-                these_users.append(toot['account'])
-                if(len(toot['mentions'])):
-                    these_users += toot['mentions']
+                these_users += _accounts_named_by(toot)
                 if(toot['reblog'] is not None):
-                    these_users.append(toot['reblog']['account'])
-                    if(len(toot['reblog']['mentions'])):
-                        these_users += toot['reblog']['mentions']
+                    these_users += _accounts_named_by(toot['reblog'])
             for user in these_users:
-                if user not in mentioned_users and user['acct'] not in state.all_known_users:
+                if user not in mentioned_users and user.acct not in state.all_known_users:
                     mentioned_users.append(user)
 
         add_user_posts(home, filter_known_users(mentioned_users, state.all_known_users), state.recently_checked_users, http=http, config=config, state=state)
 
+
+
+def _accounts_named_by(toot: Toot) -> list[User]:
+    """Who wrote a post, and everyone it mentions"""
+    return usable(
+        mastodon.to_user(raw) for raw in [toot['account'], *toot['mentions']]
+    )
 
 
 def fetch_from_lists(ctx: Context) -> None:

@@ -7,6 +7,7 @@ import pytest
 from fedifetcher import tasks
 from fedifetcher.api.mastodon import to_post
 from fedifetcher.store import State
+from tests.conftest import make_user
 
 
 @patch("fedifetcher.tasks.get_all_known_context_urls")
@@ -193,47 +194,52 @@ def test_one_users_failure_does_not_stop_the_others(caplog):
     assert "Error getting replies for user 1" in caplog.text
 
 
+def raw_account(acct):
+    """An account in the shape a post names it, before it becomes a User"""
+    return {"acct": acct, "url": f"https://remote.example/@{acct}"}
+
+
 def timeline_post(acct="author@remote.example", mentions=(), reblog=None):
     return {
         "url": f"https://remote.example/@{acct}/1",
         "created_at": datetime.now(UTC).isoformat(),
-        "account": {"acct": acct},
-        "mentions": list(mentions),
+        "account": raw_account(acct),
+        "mentions": [raw_account(m) for m in mentions],
         "reblog": reblog,
     }
 
 
 def test_timeline_context_backfills_authors_and_mentions():
     ctx = real_context(backfill_mentioned_users=True)
-    post = timeline_post(mentions=[{"acct": "mentioned@remote.example"}])
+    post = timeline_post(mentions=["mentioned@remote.example"])
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=[]), \
          patch.object(tasks, "add_context_urls"), \
          patch.object(tasks, "add_user_posts") as backfill:
         tasks.fetch_timeline_context([post], ctx.home, http=ctx.http, config=ctx.config, state=ctx.state)
 
-    backfilled = [u["acct"] for u in backfill.call_args[0][1]]
+    backfilled = [user.acct for user in backfill.call_args[0][1]]
     assert backfilled == ["author@remote.example", "mentioned@remote.example"]
 
 
 def test_a_boosted_post_backfills_the_original_author():
     ctx = real_context(backfill_mentioned_users=True)
-    post = timeline_post(reblog={"account": {"acct": "original@remote.example"}, "mentions": []})
+    post = timeline_post(reblog={"account": raw_account("original@remote.example"), "mentions": []})
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=[]), \
          patch.object(tasks, "add_context_urls"), \
          patch.object(tasks, "add_user_posts") as backfill:
         tasks.fetch_timeline_context([post], ctx.home, http=ctx.http, config=ctx.config, state=ctx.state)
 
-    backfilled = [u["acct"] for u in backfill.call_args[0][1]]
+    backfilled = [user.acct for user in backfill.call_args[0][1]]
     assert "original@remote.example" in backfilled
 
 
 def test_a_boost_of_a_post_that_mentions_people_backfills_them_too():
     ctx = real_context(backfill_mentioned_users=True)
     post = timeline_post(reblog={
-        "account": {"acct": "original@remote.example"},
-        "mentions": [{"acct": "mentioned@remote.example"}],
+        "account": raw_account("original@remote.example"),
+        "mentions": [raw_account("mentioned@remote.example")],
     })
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=[]), \
@@ -241,7 +247,7 @@ def test_a_boost_of_a_post_that_mentions_people_backfills_them_too():
          patch.object(tasks, "add_user_posts") as backfill:
         tasks.fetch_timeline_context([post], ctx.home, http=ctx.http, config=ctx.config, state=ctx.state)
 
-    backfilled = [u["acct"] for u in backfill.call_args[0][1]]
+    backfilled = [user.acct for user in backfill.call_args[0][1]]
     assert "mentioned@remote.example" in backfilled
 
 
@@ -342,13 +348,13 @@ def test_the_home_timeline_is_fetched_to_the_configured_length():
 )
 def test_each_backfill_task_uses_its_own_source_and_collection(task, setting, fetcher, collection):
     ctx = real_context(user="", **setting)
-    getattr(ctx.home, fetcher).return_value = [{"acct": "new@remote.example"}]
+    getattr(ctx.home, fetcher).return_value = [make_user(acct="new@remote.example")]
 
     with patch.object(tasks, "add_user_posts") as backfill:
         getattr(tasks, task)(ctx)
 
     getattr(ctx.home, fetcher).assert_called_once()
-    assert backfill.call_args[0][1] == [{"acct": "new@remote.example"}]
+    assert backfill.call_args[0][1] == [make_user(acct="new@remote.example")]
     assert backfill.call_args[0][2] is getattr(ctx.state, collection)
 
 
@@ -356,13 +362,13 @@ def test_accounts_we_already_know_are_filtered_out_before_backfilling():
     ctx = real_context(user="", max_followers=5)
     ctx.state.all_known_users.add("known@remote.example")
     ctx.home.followers.return_value = [
-        {"acct": "known@remote.example"}, {"acct": "new@remote.example"}
+        make_user(acct="known@remote.example"), make_user(acct="new@remote.example")
     ]
 
     with patch.object(tasks, "add_user_posts") as backfill:
         tasks.backfill_followers(ctx)
 
-    assert backfill.call_args[0][1] == [{"acct": "new@remote.example"}]
+    assert backfill.call_args[0][1] == [make_user(acct="new@remote.example")]
 
 
 def test_favourites_pull_context_for_what_they_find():

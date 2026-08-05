@@ -21,9 +21,9 @@ logger = logging.getLogger("FediFetcher")
 Toot = dict[str, Any]
 """A post from our own server, still in the shape it arrived in.
 
-Only the paths that chase who a post replied to still read these: they need
-in_reply_to_id, in_reply_to_account_id and mentions, and mentions are
-accounts, which have not been given a shape of their own yet.
+Only the paths that chase who a post replied to still read these, for the
+one thing a Post does not carry: in_reply_to_account_id, and the mentions to
+look it up in.
 """
 
 RepliedToot = tuple[str, PostRef]

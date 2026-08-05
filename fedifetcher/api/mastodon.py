@@ -233,14 +233,17 @@ class HomeServer:
     def favourites(self, limit: int) -> list[Any]:
         return self._paginated("/api/v1/favourites", limit)
 
-    def follow_requests(self, limit: int) -> list[Any]:
-        return self._paginated("/api/v1/follow_requests", limit)
+    def _accounts(self, path: str, stop_at: int | datetime) -> list[User]:
+        return usable(to_user(raw) for raw in self._paginated(path, stop_at))
 
-    def followers(self, user_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/accounts/{user_id}/followers", limit)
+    def follow_requests(self, limit: int) -> list[User]:
+        return self._accounts("/api/v1/follow_requests", limit)
 
-    def following(self, user_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/accounts/{user_id}/following", limit)
+    def followers(self, user_id: str, limit: int) -> list[User]:
+        return self._accounts(f"/api/v1/accounts/{user_id}/followers", limit)
+
+    def following(self, user_id: str, limit: int) -> list[User]:
+        return self._accounts(f"/api/v1/accounts/{user_id}/following", limit)
 
     def lists(self) -> list[Any]:
         return self._paginated("/api/v1/lists", 99)
@@ -248,17 +251,18 @@ class HomeServer:
     def list_timeline(self, list_id: str, limit: int) -> list[Any]:
         return self._paginated(f"/api/v1/timelines/list/{list_id}", limit)
 
-    def list_accounts(self, list_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/lists/{list_id}/accounts", limit)
+    def list_accounts(self, list_id: str, limit: int) -> list[User]:
+        return self._accounts(f"/api/v1/lists/{list_id}/accounts", limit)
 
-    def notification_accounts(self, since: datetime) -> list[Any]:
+    def notification_accounts(self, since: datetime) -> list[User]:
         """Accounts appearing in notifications since the given time"""
         notifications = self._paginated("/api/v1/notifications", since)
-        accounts: list[Any] = []
+        accounts: list[User] = []
         for notification in notifications:
             when = parser.parse(notification['created_at'])
-            if when >= since and notification['account'] not in accounts:
-                accounts.append(notification['account'])
+            account = to_user(notification['account'])
+            if when >= since and account is not None and account not in accounts:
+                accounts.append(account)
         return accounts
 
     def timeline(self, limit: int) -> list[Any]:

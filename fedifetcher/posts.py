@@ -4,11 +4,13 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from dateutil import parser
 
 logger = logging.getLogger("FediFetcher")
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,9 +46,9 @@ class Post:
         return self.in_reply_to_id is not None or self.reply_count is not None
 
 
-def usable(posts: Iterable[Post | None]) -> list[Post]:
-    """Keep the posts we could make sense of, and forget the rest"""
-    return [post for post in posts if post is not None]
+def usable(things: Iterable[T | None]) -> list[T]:
+    """Keep what we could make sense of, and forget the rest"""
+    return [thing for thing in things if thing is not None]
 
 
 def parse_date(value: Any) -> datetime | None:

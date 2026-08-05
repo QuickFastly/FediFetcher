@@ -6,6 +6,7 @@ import pytest
 
 from fedifetcher.posts import Post
 from fedifetcher.store import State
+from fedifetcher.users import User
 
 
 def make_post(**overrides: Any) -> Post:
@@ -17,6 +18,15 @@ def make_post(**overrides: Any) -> Post:
         "is_public": True,
     }
     return Post(**{**fields, **overrides})
+
+
+def make_user(**overrides: Any) -> User:
+    """A User who has not asked to be left alone, unless a test says so"""
+    fields: dict[str, Any] = {
+        "acct": "someone@remote.example",
+        "url": "https://remote.example/@someone",
+    }
+    return User(**{**fields, **overrides})
 
 
 @pytest.fixture

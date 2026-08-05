@@ -13,7 +13,8 @@ from fedifetcher.backfill import (
 )
 from fedifetcher.config import Config
 from fedifetcher.state import TimestampedSet
-from tests.conftest import make_post
+from fedifetcher.users import User
+from tests.conftest import make_post, make_user
 
 
 def config_with(**settings: Any) -> Config:
@@ -28,8 +29,8 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts, state, home)
     config = Mock()
     http = Mock()
     followings = [
-        {"acct": "user1", "url": "https://user1.com"},
-        {"acct": "user2", "url": "https://test_server/user2"},
+        make_user(acct="user1", url="https://user1.com"),
+        make_user(acct="user2", url="https://test_server/user2"),
     ]
     known_followings = TimestampedSet()
 
@@ -59,7 +60,7 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts, state, home)
 def test_add_user_posts_with_no_new_posts(mock_logger, mock_add_post, mock_get_posts, state, home):
     config = Mock()
     http = Mock()
-    followings = [{"acct": "user1", "url": "https://user1.com"}]
+    followings = [make_user(acct="user1", url="https://user1.com")]
     known_followings = TimestampedSet()
     state.seen_urls.update(["https://user1.com/post1", "https://user1.com/post2"])
 
@@ -96,32 +97,25 @@ def test_add_post_with_context_post_not_added(state, home, http):
 
 
 def test_user_has_opted_out():
-    assert not user_has_opted_out({"note": "I love robots"})
-    assert user_has_opted_out({"note": "I love robots, nobot"})
-    assert user_has_opted_out({"note": "/tags/nobot"})
-    assert user_has_opted_out({"indexable": False})
-    assert user_has_opted_out({"discoverable": False})
+    assert not user_has_opted_out(make_user())
+    assert not user_has_opted_out(make_user(note="I love robots"))
+    assert user_has_opted_out(make_user(note="I love robots, nobot"))
+    assert user_has_opted_out(make_user(note="/tags/nobot"))
+    assert user_has_opted_out(make_user(indexable=False))
+    assert user_has_opted_out(make_user(discoverable=False))
 
 
 def test_filter_known_users():
-    users = [
-        {"acct": "user1"},
-        {"acct": "user2"},
-        {"acct": "user3"},
-    ]
+    users = [make_user(acct=f"user{n}") for n in (1, 2, 3)]
     known_users = ["user1", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
 
-    assert filtered_users == [{"acct": "user2"}]
+    assert filtered_users == [make_user(acct="user2")]
 
 
 def test_filter_known_users_no_known_users():
-    users = [
-        {"acct": "user1"},
-        {"acct": "user2"},
-        {"acct": "user3"},
-    ]
+    users = [make_user(acct=f"user{n}") for n in (1, 2, 3)]
     known_users: list[str] = []
 
     filtered_users = filter_known_users(users, known_users)
@@ -130,11 +124,7 @@ def test_filter_known_users_no_known_users():
 
 
 def test_filter_known_users_all_users_known():
-    users = [
-        {"acct": "user1"},
-        {"acct": "user2"},
-        {"acct": "user3"},
-    ]
+    users = [make_user(acct=f"user{n}") for n in (1, 2, 3)]
     known_users = ["user1", "user2", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
@@ -143,7 +133,7 @@ def test_filter_known_users_all_users_known():
 
 
 def test_filter_known_users_no_users():
-    users: list[dict[str, str]] = []
+    users: list[User] = []
     known_users = ["user1", "user2", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
@@ -152,7 +142,7 @@ def test_filter_known_users_no_users():
 
 
 def account(acct="someone@remote.example", url="https://remote.example/@someone", **extra):
-    return {"acct": acct, "url": url, **extra}
+    return make_user(acct=acct, url=url, **extra)
 
 
 def test_opted_out_users_are_left_alone(state, http, caplog):
