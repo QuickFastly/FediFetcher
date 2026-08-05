@@ -1,22 +1,46 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 from fedifetcher.api import client_for
 from fedifetcher.context import add_context_urls, get_all_known_context_urls
 from fedifetcher.servers import get_server_info
 from fedifetcher.urls import parse_url, parse_user_url
 
+if TYPE_CHECKING:
+    from collections.abc import Container, Iterable
+
+    from fedifetcher.api.mastodon import HomeServer
+    from fedifetcher.config import Config
+    from fedifetcher.http import HttpClient
+    from fedifetcher.state import TimestampedSet
+    from fedifetcher.store import State
+
 logger = logging.getLogger("FediFetcher")
 
+User = dict[str, Any]
+"""An account, as the server gave it to us.
 
-def filter_known_users(users, known_users):
-    return list(filter(
-        lambda user: user['acct'] not in known_users,
-        users
-    ))
+We read acct, url, note, indexable and discoverable. The last three are
+how an account opts out of being backfilled, and any of them may be absent.
+"""
 
-def user_has_opted_out(user):
+Post = dict[str, Any]
+"""A post by an account we are backfilling, as its server gave it to us.
+
+We read url, reblog, renoteId, replies_count and in_reply_to_id. Which of
+those exist depends on the software: reblog is Mastodon's, renoteId is
+Misskey's, and we check for both rather than ask what we are talking to.
+"""
+
+
+def filter_known_users(
+    users: Iterable[User], known_users: Container[str]
+) -> list[User]:
+    return [user for user in users if user['acct'] not in known_users]
+
+def user_has_opted_out(user: User) -> bool:
     if 'note' in user and isinstance(user['note'], str) and (' nobot' in user['note'].lower() or '/tags/nobot' in user['note'].lower()):
         return True
     if 'indexable' in user and not user['indexable']:
@@ -26,7 +50,14 @@ def user_has_opted_out(user):
     return False
 
 
-def get_user_posts(user, target, server, *, http, state):
+def get_user_posts(
+    user: User,
+    target: TimestampedSet,
+    server: str,
+    *,
+    http: HttpClient,
+    state: State,
+) -> list[Post] | None:
     if user_has_opted_out(user):
         logger.debug(f"User {user['acct']} has opted out of backfilling")
         return None
@@ -53,7 +84,9 @@ def get_user_posts(user, target, server, *, http, state):
 
     return client.fetch_user_posts(parsed_url[1], user['url'])
 
-def add_post_with_context(post, home, *, http, config, state):
+def add_post_with_context(
+    post: Post, home: HomeServer, *, http: HttpClient, config: Config, state: State
+) -> bool:
     added = home.resolve(post['url'])
     if added is True:
         state.seen_urls.add(post['url'])
@@ -67,7 +100,15 @@ def add_post_with_context(post, home, *, http, config, state):
 
     return False
 
-def add_user_posts(home, followings, target, *, http, config, state):
+def add_user_posts(
+    home: HomeServer,
+    followings: Iterable[User],
+    target: TimestampedSet,
+    *,
+    http: HttpClient,
+    config: Config,
+    state: State,
+) -> None:
     for user in followings:
         if user['acct'] not in state.all_known_users and not user['url'].startswith(f"https://{home.server}/"):
             posts = get_user_posts(user, target, home.server, http=http, state=state)

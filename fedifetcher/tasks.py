@@ -4,6 +4,7 @@ import itertools
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from dateutil import parser
 
@@ -11,6 +12,7 @@ from fedifetcher.api.mastodon import HomeServer
 from fedifetcher.backfill import add_user_posts, filter_known_users
 from fedifetcher.config import Config
 from fedifetcher.context import (
+    Toot,
     add_context_urls,
     get_all_context_urls,
     get_all_known_context_urls,
@@ -18,6 +20,11 @@ from fedifetcher.context import (
 )
 from fedifetcher.http import HttpClient
 from fedifetcher.store import State
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from fedifetcher.backfill import User
 
 logger = logging.getLogger("FediFetcher")
 
@@ -32,7 +39,13 @@ class Context:
     home: HomeServer
 
 
-def get_all_reply_toots(home, user_ids, reply_interval_hours, *, state):
+def get_all_reply_toots(
+    home: HomeServer,
+    user_ids: Iterable[str],
+    reply_interval_hours: float,
+    *,
+    state: State,
+) -> list[Toot]:
     """get all replies to other users by the given users in the last day"""
     replies_since = datetime.now() - timedelta(hours=reply_interval_hours)
     reply_toots = list(
@@ -45,7 +58,9 @@ def get_all_reply_toots(home, user_ids, reply_interval_hours, *, state):
     return reply_toots
 
 
-def get_reply_toots(user_id, home, reply_since, *, state):
+def get_reply_toots(
+    user_id: str, home: HomeServer, reply_since: datetime, *, state: State
+) -> list[Toot]:
     """get replies by the user to other users since the given date"""
     try:
         statuses = home.account_statuses(user_id)
@@ -68,16 +83,23 @@ def get_reply_toots(user_id, home, reply_since, *, state):
     return toots
 
 
-def fetch_timeline_context(timeline_posts, home, *, http, config, state):
+def fetch_timeline_context(
+    timeline_posts: list[Toot],
+    home: HomeServer,
+    *,
+    http: HttpClient,
+    config: Config,
+    state: State,
+) -> None:
     known_context_urls = get_all_known_context_urls(config.server, timeline_posts, http=http, state=state)
     add_context_urls(home, known_context_urls, state=state)
 
     # Backfill any post authors, and any mentioned users
     if config.backfill_mentioned_users:
-        mentioned_users = []
+        mentioned_users: list[User] = []
         cut_off = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(minutes=60)
         for toot in timeline_posts:
-            these_users = []
+            these_users: list[User] = []
             toot_created_at = parser.parse(toot['created_at'])
             if len(mentioned_users) < 10 or (toot_created_at > cut_off and len(mentioned_users) < 30):
                 these_users.append(toot['account'])
@@ -188,7 +210,7 @@ def fetch_favourite_context(ctx: Context) -> None:
     _pull_context_for(ctx, favourites)
 
 
-def _pull_context_for(ctx: Context, posts: list) -> None:
+def _pull_context_for(ctx: Context, posts: list[Toot]) -> None:
     known_context_urls = get_all_known_context_urls(
         ctx.config.server, posts, http=ctx.http, state=ctx.state
     )
@@ -196,7 +218,7 @@ def _pull_context_for(ctx: Context, posts: list) -> None:
 
 
 # each task runs only when its setting asks for it
-ENABLED_BY = (
+ENABLED_BY: tuple[tuple[Callable[[Config], bool], Callable[[Context], None]], ...] = (
     (lambda c: c.from_lists, fetch_from_lists),
     (lambda c: c.reply_interval_in_hours > 0, fetch_reply_context),
     (lambda c: c.home_timeline_length > 0, fetch_home_timeline),
