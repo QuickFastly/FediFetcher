@@ -9,6 +9,7 @@ from dateutil import parser
 
 from fedifetcher.posts import Post, parse_date, unusable, usable
 from fedifetcher.servers import ApiFlavour
+from fedifetcher.users import User
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient
@@ -36,6 +37,25 @@ def to_post(raw: dict[str, Any]) -> Post | None:
         reblog=to_post(boosted) if boosted is not None else None,
         in_reply_to_id=raw.get("in_reply_to_id"),
         reply_count=raw.get("replies_count"),
+    )
+
+
+def to_user(raw: dict[str, Any]) -> User | None:
+    """An account, either listed by our server or named by one of its posts"""
+    acct = raw.get("acct")
+    url = raw.get("url")
+    if acct is None or url is None:
+        unusable("mastodon", raw.get("id"))
+        return None
+
+    note = raw.get("note")
+    return User(
+        acct=acct,
+        url=url,
+        note=note if isinstance(note, str) else "",
+        # absent means the account never said, which is not the same as no
+        indexable=raw.get("indexable", True),
+        discoverable=raw.get("discoverable", True),
     )
 
 

@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
+from typing import TypeVar
 
 import pytest
 
-from fedifetcher.api.mastodon import MastodonApi, to_post
-from fedifetcher.posts import Post
+from fedifetcher.api.mastodon import MastodonApi, to_post, to_user
 from fedifetcher.servers import ApiFlavour
 
 
@@ -14,10 +14,13 @@ def api(http):
 WHEN = "2026-01-01T00:00:00.000Z"
 
 
-def built(post: Post | None) -> Post:
-    """The builder drops what it cannot use; these tests are about the rest"""
-    assert post is not None
-    return post
+T = TypeVar("T")
+
+
+def built(thing: T | None) -> T:
+    """The builders drop what they cannot use; these tests are about the rest"""
+    assert thing is not None
+    return thing
 
 
 def test_it_claims_the_mastodon_flavour():
@@ -181,3 +184,47 @@ def test_dropping_a_post_is_worth_saying_out_loud(caplog):
 def test_a_date_we_already_understand_is_left_alone():
     when = datetime(2026, 6, 1, tzinfo=UTC)
     assert built(to_post({"url": "u", "created_at": when})).created_at == when
+
+
+def account(**overrides):
+    raw = {"acct": "someone@remote.example", "url": "https://remote.example/@someone"}
+    return {**raw, **overrides}
+
+
+def test_an_account_keeps_what_it_was_given():
+    user = built(to_user(account(note="hello", indexable=False, discoverable=False)))
+
+    assert user.acct == "someone@remote.example"
+    assert user.url == "https://remote.example/@someone"
+    assert user.note == "hello"
+    assert not user.indexable
+    assert not user.discoverable
+
+
+def test_an_account_that_said_nothing_is_taken_to_have_agreed():
+    user = built(to_user(account()))
+
+    assert user.note == ""
+    assert user.indexable
+    assert user.discoverable
+
+
+def test_a_mention_is_an_account_too():
+    mention = built(to_user(
+        {"id": "1", "username": "someone", "acct": "someone@remote.example",
+         "url": "https://remote.example/@someone"}
+    ))
+
+    assert mention.acct == "someone@remote.example"
+
+
+def test_a_note_that_is_not_text_is_treated_as_no_note():
+    assert built(to_user(account(note=None))).note == ""
+
+
+@pytest.mark.parametrize("missing", ["acct", "url"])
+def test_an_account_we_cannot_name_or_reach_is_dropped(missing):
+    raw = account()
+    del raw[missing]
+
+    assert to_user(raw) is None
