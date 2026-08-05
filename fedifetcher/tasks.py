@@ -6,20 +6,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from dateutil import parser
-
-from fedifetcher.api import mastodon
 from fedifetcher.api.mastodon import HomeServer
 from fedifetcher.backfill import add_user_posts, filter_known_users
 from fedifetcher.config import Config
 from fedifetcher.context import (
-    Toot,
     add_context_urls,
     get_all_context_urls,
     get_all_known_context_urls,
     get_all_replied_toot_server_ids,
 )
 from fedifetcher.http import HttpClient
+from fedifetcher.posts import Post
 from fedifetcher.store import State
 from fedifetcher.translate import usable
 from fedifetcher.users import User
@@ -47,7 +44,7 @@ def get_all_reply_toots(
     reply_interval_hours: float,
     *,
     state: State,
-) -> list[Toot]:
+) -> list[Post]:
     """get all replies to other users by the given users in the last day"""
     # a post's date is UTC, so the window has to be measured in UTC too: local
     # time here quietly shortened the interval east of UTC and lengthened it west
@@ -64,7 +61,7 @@ def get_all_reply_toots(
 
 def get_reply_toots(
     user_id: str, home: HomeServer, reply_since: datetime, *, state: State
-) -> list[Toot]:
+) -> list[Post]:
     """get replies by the user to other users since the given date"""
     try:
         statuses = home.account_statuses(user_id)
@@ -77,18 +74,17 @@ def get_reply_toots(
     toots = [
         toot
         for toot in statuses
-        if toot["in_reply_to_id"] is not None
-        and toot["url"] not in state.seen_urls
-        and datetime.strptime(toot["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
-        .replace(tzinfo=UTC) > reply_since
+        if toot.in_reply_to_id is not None
+        and toot.url not in state.seen_urls
+        and toot.created_at > reply_since
     ]
     for toot in toots:
-        logger.debug(f"Found reply toot: {toot['url']}")
+        logger.debug(f"Found reply toot: {toot.url}")
     return toots
 
 
 def fetch_timeline_context(
-    timeline_posts: list[Toot],
+    timeline_posts: list[Post],
     home: HomeServer,
     *,
     http: HttpClient,
@@ -96,7 +92,7 @@ def fetch_timeline_context(
     state: State,
 ) -> None:
     known_context_urls = get_all_known_context_urls(
-        config.server, usable(map(mastodon.to_post, timeline_posts)), http=http, state=state
+        config.server, timeline_posts, http=http, state=state
     )
     add_context_urls(home, known_context_urls, state=state)
 
@@ -106,11 +102,10 @@ def fetch_timeline_context(
         cut_off = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(minutes=60)
         for toot in timeline_posts:
             these_users: list[User] = []
-            toot_created_at = parser.parse(toot['created_at'])
-            if len(mentioned_users) < 10 or (toot_created_at > cut_off and len(mentioned_users) < 30):
+            if len(mentioned_users) < 10 or (toot.created_at > cut_off and len(mentioned_users) < 30):
                 these_users += _accounts_named_by(toot)
-                if(toot['reblog'] is not None):
-                    these_users += _accounts_named_by(toot['reblog'])
+                if toot.reblog is not None:
+                    these_users += _accounts_named_by(toot.reblog)
             for user in these_users:
                 if user not in mentioned_users and user.acct not in state.all_known_users:
                     mentioned_users.append(user)
@@ -119,11 +114,9 @@ def fetch_timeline_context(
 
 
 
-def _accounts_named_by(toot: Toot) -> list[User]:
+def _accounts_named_by(toot: Post) -> list[User]:
     """Who wrote a post, and everyone it mentions"""
-    return usable(
-        mastodon.to_user(raw) for raw in [toot['account'], *toot['mentions']]
-    )
+    return usable([toot.account, *toot.mentions])
 
 
 def fetch_from_lists(ctx: Context) -> None:
@@ -149,8 +142,7 @@ def fetch_reply_context(ctx: Context) -> None:
         ctx.home, user_ids, ctx.config.reply_interval_in_hours, state=ctx.state
     )
     known_context_urls = get_all_known_context_urls(
-        ctx.config.server, usable(map(mastodon.to_post, reply_toots)),
-        http=ctx.http, state=ctx.state
+        ctx.config.server, reply_toots, http=ctx.http, state=ctx.state
     )
     ctx.state.seen_urls.update(known_context_urls)
     replied_toot_ids = get_all_replied_toot_server_ids(
@@ -220,9 +212,9 @@ def fetch_favourite_context(ctx: Context) -> None:
     _pull_context_for(ctx, favourites)
 
 
-def _pull_context_for(ctx: Context, posts: list[Toot]) -> None:
+def _pull_context_for(ctx: Context, posts: list[Post]) -> None:
     known_context_urls = get_all_known_context_urls(
-        ctx.config.server, usable(map(mastodon.to_post, posts)), http=ctx.http, state=ctx.state
+        ctx.config.server, posts, http=ctx.http, state=ctx.state
     )
     add_context_urls(ctx.home, known_context_urls, state=ctx.state)
 

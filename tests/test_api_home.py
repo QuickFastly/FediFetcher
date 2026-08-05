@@ -20,6 +20,19 @@ def page(json_data, next_url=None):
     return resp
 
 
+def status(n):
+    """A post in the shape our own server sends it"""
+    return {
+        "url": f"https://example.social/@a/{n}",
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "visibility": "public",
+    }
+
+
+def urls(posts):
+    return [post.url for post in posts]
+
+
 def test_requests_carry_the_token(home, http, reply):
     http.get.return_value = page([])
     home.bookmarks(5)
@@ -35,18 +48,18 @@ def test_a_limit_becomes_a_query_parameter(home, http):
 
 def test_pages_are_followed_until_the_limit_is_reached(home, http):
     http.get.side_effect = [
-        page([1, 2], next_url="https://example.social/next"),
-        page([3, 4]),
+        page([status(1), status(2)], next_url="https://example.social/next"),
+        page([status(3), status(4)]),
     ]
-    assert home.favourites(4) == [1, 2, 3, 4]
+    assert urls(home.favourites(4)) == [f"https://example.social/@a/{n}" for n in (1, 2, 3, 4)]
 
 
 def test_pagination_stops_when_a_page_is_not_a_list(home, http):
     http.get.side_effect = [
-        page([1], next_url="https://example.social/next"),
+        page([status(1)], next_url="https://example.social/next"),
         page({"error": "nope"}),
     ]
-    assert home.favourites(5) == [1]
+    assert urls(home.favourites(5)) == ["https://example.social/@a/1"]
 
 
 def test_pagination_by_date_stops_at_the_cutoff(home, http):
@@ -104,10 +117,10 @@ def test_notifications_older_than_the_cutoff_are_ignored(home, http):
 
 def test_the_timeline_is_paginated_to_the_requested_length(home, http):
     http.get.side_effect = [
-        page([1, 2], next_url="https://example.social/next"),
-        page([3, 4]),
+        page([status(1), status(2)], next_url="https://example.social/next"),
+        page([status(3), status(4)]),
     ]
-    assert home.timeline(4) == [1, 2, 3, 4]
+    assert urls(home.timeline(4)) == [f"https://example.social/@a/{n}" for n in (1, 2, 3, 4)]
 
 
 def test_active_user_ids_are_those_who_posted_recently(home, http):

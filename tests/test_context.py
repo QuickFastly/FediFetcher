@@ -7,7 +7,7 @@ import pytest
 from fedifetcher import context
 from fedifetcher.context import add_context_urls, get_toot_context
 from fedifetcher.urls import PostRef
-from tests.conftest import make_post
+from tests.conftest import make_post, make_user
 
 
 @pytest.fixture
@@ -77,29 +77,29 @@ def test_get_all_known_context_urls(parse_url, get_toot_context, state, http):
 
 def test_get_replied_toot_server_id_no_mentions(state):
     http = Mock()
-    toot = {"in_reply_to_id": "1", "in_reply_to_account_id": "1", "mentions": []}
+    toot = make_post(in_reply_to_id="1", in_reply_to_account_id="1")
     assert context.get_replied_toot_server_id("server", toot, http=http, state=state) is None
 
 
 def test_get_replied_toot_server_id_no_url_redirect(state):
     http = Mock()
     http.get_redirect_url.return_value = None
-    toot = {
-        "in_reply_to_id": "1",
-        "in_reply_to_account_id": "1",
-        "mentions": [{"id": "1", "acct": "account"}],
-    }
+    toot = make_post(
+        in_reply_to_id="1",
+        in_reply_to_account_id="1",
+        mentions=(make_user(id="1", acct="account"),),
+    )
     assert context.get_replied_toot_server_id("server", toot, http=http, state=state) is None
 
 
 def test_get_replied_toot_server_id_with_url_redirect(state):
     http = Mock()
     http.get_redirect_url.return_value = "redirect_url"
-    toot = {
-        "in_reply_to_id": "1",
-        "in_reply_to_account_id": "1",
-        "mentions": [{"id": "1", "acct": "account"}],
-    }
+    toot = make_post(
+        in_reply_to_id="1",
+        in_reply_to_account_id="1",
+        mentions=(make_user(id="1", acct="account"),),
+    )
     match = PostRef("server", "1")
     with patch("fedifetcher.context.parse_url", return_value=match) as mock_parse:
         assert context.get_replied_toot_server_id(
@@ -110,11 +110,11 @@ def test_get_replied_toot_server_id_with_url_redirect(state):
 
 def test_get_replied_toot_server_id_with_existing_replied_toot_server_ids(state):
     http = Mock()
-    toot = {
-        "in_reply_to_id": "1",
-        "in_reply_to_account_id": "1",
-        "mentions": [{"id": "1", "acct": "account"}],
-    }
+    toot = make_post(
+        in_reply_to_id="1",
+        in_reply_to_account_id="1",
+        mentions=(make_user(id="1", acct="account"),),
+    )
     cached = ("url", PostRef("server", "1"))
     state.replied_toot_server_ids = {"https://server/@account/1": cached}
 
@@ -270,11 +270,11 @@ def test_replied_toot_ids_drop_the_ones_that_could_not_be_worked_out(state, http
 
 
 def test_an_unparseable_redirect_is_remembered_as_a_dead_end(state, http, caplog):
-    toot = {
-        "in_reply_to_id": "1",
-        "in_reply_to_account_id": "1",
-        "mentions": [{"id": "1", "acct": "account"}],
-    }
+    toot = make_post(
+        in_reply_to_id="1",
+        in_reply_to_account_id="1",
+        mentions=(make_user(id="1", acct="account"),),
+    )
     http.get_redirect_url.return_value = "https://elsewhere/nonsense"
 
     with patch.object(context, "parse_url", return_value=None):

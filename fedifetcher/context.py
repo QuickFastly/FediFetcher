@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from fedifetcher.api import client_for
 from fedifetcher.posts import Post
@@ -17,14 +17,6 @@ if TYPE_CHECKING:
     from fedifetcher.store import State
 
 logger = logging.getLogger("FediFetcher")
-
-Toot = dict[str, Any]
-"""A post from our own server, still in the shape it arrived in.
-
-Only the paths that chase who a post replied to still read these, for the
-one thing a Post does not carry: in_reply_to_account_id, and the mentions to
-look it up in.
-"""
 
 RepliedToot = tuple[str, PostRef]
 """A post that was replied to: the URL we followed, and where it landed."""
@@ -64,7 +56,7 @@ def get_all_known_context_urls(
 
 
 def get_all_replied_toot_server_ids(
-    server: str, reply_toots: Iterable[Toot], *, http: HttpClient, state: State
+    server: str, reply_toots: Iterable[Post], *, http: HttpClient, state: State
 ) -> Iterator[RepliedToot]:
     """get the server and ID of the toots the given toots replied to"""
     return (
@@ -76,22 +68,20 @@ def get_all_replied_toot_server_ids(
 
 
 def get_replied_toot_server_id(
-    server: str, toot: Toot, *, http: HttpClient, state: State
+    server: str, toot: Post, *, http: HttpClient, state: State
 ) -> RepliedToot | None:
     """get the server and ID of the toot the given toot replied to"""
-    in_reply_to_id = toot["in_reply_to_id"]
-    in_reply_to_account_id = toot["in_reply_to_account_id"]
     mentions = [
         mention
-        for mention in toot["mentions"]
-        if mention["id"] == in_reply_to_account_id
+        for mention in toot.mentions
+        if mention.id == toot.in_reply_to_account_id
     ]
     if len(mentions) == 0:
         return None
 
     mention = mentions[0]
 
-    o_url = f"https://{server}/@{mention['acct']}/{in_reply_to_id}"
+    o_url = f"https://{server}/@{mention.acct}/{toot.in_reply_to_id}"
     if o_url in state.replied_toot_server_ids:
         # a cache entry that survived a run is JSON, so the PostRef is a list
         return cast("RepliedToot | None", state.replied_toot_server_ids[o_url])

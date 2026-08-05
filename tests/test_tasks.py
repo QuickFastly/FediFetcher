@@ -5,9 +5,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from fedifetcher import tasks
-from fedifetcher.api.mastodon import to_post
 from fedifetcher.store import State
-from tests.conftest import make_user
+from tests.conftest import make_post, make_user
 
 
 @patch("fedifetcher.tasks.get_all_known_context_urls")
@@ -122,17 +121,14 @@ def test_bookmarks_pull_context_for_what_they_find():
 
     ctx.home.bookmarks.assert_called_once_with(5)
     gather.assert_called_once_with(
-        ctx.config.server, [to_post(bookmark)], http=ctx.http, state=ctx.state
+        ctx.config.server, [bookmark], http=ctx.http, state=ctx.state
     )
     add.assert_called_once_with(ctx.home, ["url"], state=ctx.state)
 
 
 def raw_status(url="https://our.example/@a/1"):
-    """A post in the shape our own server sends, before it becomes a Post"""
-    return {
-        "url": url, "uri": url, "visibility": "public",
-        "created_at": "2026-01-01T00:00:00.000Z",
-    }
+    """A post as our own server hands it over, already translated"""
+    return make_post(url=url, uri=url)
 
 
 def real_context(**settings):
@@ -143,30 +139,31 @@ def real_context(**settings):
 
 
 def reply(url, created_at, in_reply_to="7"):
-    return {"url": url, "in_reply_to_id": in_reply_to, "created_at": created_at}
+    return make_post(url=url, in_reply_to_id=in_reply_to, created_at=created_at)
 
 
-RECENT = (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-OLD = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+RECENT = datetime.now(UTC) - timedelta(minutes=5)
+OLD = datetime.now(UTC) - timedelta(days=5)
+A_DAY_AGO = datetime.now(UTC) - timedelta(days=1)
 
 
 def test_only_replies_count_as_reply_toots():
     ctx = real_context()
     ctx.home.account_statuses.return_value = [
         reply("https://our.example/@a/1", RECENT),
-        {"url": "https://our.example/@a/2", "in_reply_to_id": None, "created_at": RECENT},
+        make_post(url="https://our.example/@a/2", created_at=RECENT),
     ]
 
-    toots = tasks.get_reply_toots("1", ctx.home, datetime.now(UTC) - timedelta(days=1), state=ctx.state)
+    toots = tasks.get_reply_toots("1", ctx.home, A_DAY_AGO, state=ctx.state)
 
-    assert [t["url"] for t in toots] == ["https://our.example/@a/1"]
+    assert [toot.url for toot in toots] == ["https://our.example/@a/1"]
 
 
 def test_replies_older_than_the_window_are_ignored():
     ctx = real_context()
     ctx.home.account_statuses.return_value = [reply("https://our.example/@a/1", OLD)]
 
-    toots = tasks.get_reply_toots("1", ctx.home, datetime.now(UTC) - timedelta(days=1), state=ctx.state)
+    toots = tasks.get_reply_toots("1", ctx.home, A_DAY_AGO, state=ctx.state)
 
     assert toots == []
 
@@ -176,7 +173,7 @@ def test_replies_we_have_already_seen_are_ignored():
     ctx.state.seen_urls.add("https://our.example/@a/1")
     ctx.home.account_statuses.return_value = [reply("https://our.example/@a/1", RECENT)]
 
-    toots = tasks.get_reply_toots("1", ctx.home, datetime.now(UTC) - timedelta(days=1), state=ctx.state)
+    toots = tasks.get_reply_toots("1", ctx.home, A_DAY_AGO, state=ctx.state)
 
     assert toots == []
 
@@ -202,23 +199,23 @@ def test_one_users_failure_does_not_stop_the_others(caplog):
 
     toots = tasks.get_all_reply_toots(ctx.home, ["1", "2"], 24, state=ctx.state)
 
-    assert [t["url"] for t in toots] == ["https://our.example/@b/1"]
+    assert [toot.url for toot in toots] == ["https://our.example/@b/1"]
     assert "Error getting replies for user 1" in caplog.text
 
 
-def raw_account(acct):
-    """An account in the shape a post names it, before it becomes a User"""
-    return {"acct": acct, "url": f"https://remote.example/@{acct}"}
+def account(acct):
+    """An account as a post names it"""
+    return make_user(acct=acct, url=f"https://remote.example/@{acct}")
 
 
-def timeline_post(acct="author@remote.example", mentions=(), reblog=None):
-    return {
-        "url": f"https://remote.example/@{acct}/1",
-        "created_at": datetime.now(UTC).isoformat(),
-        "account": raw_account(acct),
-        "mentions": [raw_account(m) for m in mentions],
-        "reblog": reblog,
-    }
+def timeline_post(acct="author@remote.example", mentions=(), reblog=None, created_at=None):
+    return make_post(
+        url=f"https://remote.example/@{acct}/1",
+        created_at=created_at or datetime.now(UTC),
+        account=account(acct),
+        mentions=tuple(account(m) for m in mentions),
+        reblog=reblog,
+    )
 
 
 def test_timeline_context_backfills_authors_and_mentions():
@@ -236,7 +233,7 @@ def test_timeline_context_backfills_authors_and_mentions():
 
 def test_a_boosted_post_backfills_the_original_author():
     ctx = real_context(backfill_mentioned_users=True)
-    post = timeline_post(reblog={"account": raw_account("original@remote.example"), "mentions": []})
+    post = timeline_post(reblog=timeline_post(acct="original@remote.example"))
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=[]), \
          patch.object(tasks, "add_context_urls"), \
@@ -249,10 +246,9 @@ def test_a_boosted_post_backfills_the_original_author():
 
 def test_a_boost_of_a_post_that_mentions_people_backfills_them_too():
     ctx = real_context(backfill_mentioned_users=True)
-    post = timeline_post(reblog={
-        "account": raw_account("original@remote.example"),
-        "mentions": [raw_account("mentioned@remote.example")],
-    })
+    post = timeline_post(reblog=timeline_post(
+        acct="original@remote.example", mentions=["mentioned@remote.example"],
+    ))
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=[]), \
          patch.object(tasks, "add_context_urls"), \
@@ -278,12 +274,11 @@ def test_users_we_already_know_are_not_backfilled_again():
 def test_only_a_bounded_number_of_users_is_backfilled():
     """Old posts stop contributing users once ten are queued"""
     ctx = real_context(backfill_mentioned_users=True)
-    old = (datetime.now(UTC) - timedelta(days=2)).isoformat()
-    posts = []
-    for i in range(40):
-        post = timeline_post(acct=f"user{i}@remote.example")
-        post["created_at"] = old
-        posts.append(post)
+    old = datetime.now(UTC) - timedelta(days=2)
+    posts = [
+        timeline_post(acct=f"user{i}@remote.example", created_at=old)
+        for i in range(40)
+    ]
 
     with patch.object(tasks, "get_all_known_context_urls", return_value=[]), \
          patch.object(tasks, "add_context_urls"), \

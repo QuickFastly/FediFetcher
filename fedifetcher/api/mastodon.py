@@ -232,11 +232,14 @@ class HomeServer:
     def user_id(self, user: str | None = None) -> str:
         return self._api.user_id(user, self._token)
 
-    def bookmarks(self, limit: int) -> list[Any]:
-        return self._paginated("/api/v1/bookmarks", limit)
+    def _posts(self, path: str, stop_at: int | datetime) -> list[Post]:
+        return usable(to_post(raw) for raw in self._paginated(path, stop_at))
 
-    def favourites(self, limit: int) -> list[Any]:
-        return self._paginated("/api/v1/favourites", limit)
+    def bookmarks(self, limit: int) -> list[Post]:
+        return self._posts("/api/v1/bookmarks", limit)
+
+    def favourites(self, limit: int) -> list[Post]:
+        return self._posts("/api/v1/favourites", limit)
 
     def _accounts(self, path: str, stop_at: int | datetime) -> list[User]:
         return usable(to_user(raw) for raw in self._paginated(path, stop_at))
@@ -253,8 +256,8 @@ class HomeServer:
     def lists(self) -> list[Any]:
         return self._paginated("/api/v1/lists", 99)
 
-    def list_timeline(self, list_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/timelines/list/{list_id}", limit)
+    def list_timeline(self, list_id: str, limit: int) -> list[Post]:
+        return self._posts(f"/api/v1/timelines/list/{list_id}", limit)
 
     def list_accounts(self, list_id: str, limit: int) -> list[User]:
         return self._accounts(f"/api/v1/lists/{list_id}/accounts", limit)
@@ -270,7 +273,7 @@ class HomeServer:
                 accounts.append(account)
         return accounts
 
-    def timeline(self, limit: int) -> list[Any]:
+    def timeline(self, limit: int) -> list[Post]:
         """Get all post in the user's home timeline"""
         url = f"https://{self.server}/api/v1/timelines/home"
         try:
@@ -286,7 +289,7 @@ class HomeServer:
             raise
 
         logger.info(f"Found {len(toots)} toots in timeline")
-        return toots
+        return usable(to_post(raw) for raw in toots)
 
     def _toots(self, url: str) -> Any:
         response = self._http.get(url, headers=self._auth)
@@ -315,7 +318,7 @@ class HomeServer:
                     logger.info(f"Found active user: {user['username']}")
                     yield user["id"]
 
-    def account_statuses(self, user_id: str) -> list[Any]:
+    def account_statuses(self, user_id: str) -> list[Post]:
         """Recent posts by one of our users, replies included"""
         url = f"https://{self.server}/api/v1/accounts/{user_id}/statuses?exclude_replies=false&limit=40"
         resp = self._http.get(url, headers=self._auth)
@@ -325,7 +328,7 @@ class HomeServer:
                 f"Error getting replies for user {user_id} on server {self.server}",
                 resp.status_code, self._token, "read:statuses",
             )
-        return cast("list[Any]", resp.json())
+        return usable(to_post(raw) for raw in resp.json())
 
     def resolve(self, url: str) -> bool:
         """Ask our server to fetch a remote post, so it appears locally"""
