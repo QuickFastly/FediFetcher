@@ -17,12 +17,15 @@ FALSEY = frozenset({"0", "false", "no", "off", ""})
 ENV_PREFIX = "ff_"
 ACCESS_TOKEN_ENV_PREFIX = "ff_access_token"
 
+# where a checkout keeps its state, and has since long before there was a choice
+LEGACY_STATE_DIR = Path("artifacts")
+
 
 class ConfigError(Exception):
     """Raised when the supplied configuration cannot be used"""
 
 
-def opt(default: Any = MISSING, *, help: str, **extra: Any) -> Any:
+def opt(default: Any = MISSING, *, help: str, default_factory: Any = MISSING, **extra: Any) -> Any:
     """Declare a configuration option.
 
     Everything the command line parser needs is derived from the field itself,
@@ -31,9 +34,30 @@ def opt(default: Any = MISSING, *, help: str, **extra: Any) -> Any:
     name, or argparse actions.
     """
     metadata = {"help": help, **extra}
+    if default_factory is not MISSING:
+        return field(default_factory=default_factory, metadata=metadata)
     if default is MISSING:
         return field(metadata=metadata)
     return field(default=default, metadata=metadata)
+
+
+def _default_state_dir() -> Path:
+    """Where state goes when nobody says otherwise.
+
+    Every checkout has an artifacts/ directory, because artifacts/blank is
+    committed, so this keeps the clone-and-cron installs that FediFetcher is
+    usually deployed as writing exactly where they always have. An installed
+    FediFetcher, run from wherever the user happens to be, gets a home of its
+    own instead of scattering state across working directories.
+
+    The build_parser docstring explains why this is never evaluated for --help:
+    the parser defaults every option to None, so this runs only when a Config is
+    actually constructed, by which point the working directory is the real one.
+    """
+    if LEGACY_STATE_DIR.is_dir():
+        return LEGACY_STATE_DIR
+    base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state"
+    return Path(base) / "fedifetcher"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,8 +106,8 @@ class Config:
     instance_blocklist: tuple[str, ...] = opt((),
         help="A comma-separated array of instances that FediFetcher should never try to connect to")
 
-    state_dir: Path = opt(Path("artifacts"),
-        help="Directory to store persistent files and possibly lock file")
+    state_dir: Path = opt(default_factory=_default_state_dir,
+        help="Directory to store persistent files and possibly lock file. Defaults to ./artifacts if that directory exists, and to $XDG_STATE_HOME/fedifetcher (usually ~/.local/state/fedifetcher) otherwise.")
     lock_file: Path | None = opt(None,
         help="Location of the lock file")
     lock_hours: int = opt(24,

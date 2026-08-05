@@ -17,7 +17,6 @@ def test_defaults_apply_when_nothing_is_given():
     assert config.server == "example.social"
     assert config.access_tokens == ("token",)
     assert config.home_timeline_length == 0
-    assert config.state_dir == Path("artifacts")
     assert config.remember_users_for_hours == 24 * 7
 
 
@@ -162,6 +161,31 @@ def test_state_files_live_under_the_state_dir():
     config = load("--state-dir=/var/lib/ff")
     assert config.seen_urls_file == Path("/var/lib/ff/seen_urls")
     assert config.lock_path == Path("/var/lib/ff/lock.lock")
+
+
+def test_state_dir_defaults_to_artifacts_in_a_checkout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    assert load().state_dir == Path("artifacts")
+
+
+def test_state_dir_defaults_below_xdg_state_home_when_installed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", "/xdg/state")
+    assert load().state_dir == Path("/xdg/state/fedifetcher")
+
+
+def test_state_dir_falls_back_to_a_dot_local_path_without_xdg_state_home(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert load().state_dir == tmp_path / "home/.local/state/fedifetcher"
+
+
+def test_an_explicit_state_dir_beats_the_default(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    assert load("--state-dir=/var/lib/ff").state_dir == Path("/var/lib/ff")
 
 
 def test_an_explicit_lock_file_wins():
