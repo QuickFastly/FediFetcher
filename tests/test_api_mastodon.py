@@ -1,12 +1,26 @@
+from datetime import UTC, datetime
+from typing import TypeVar
+
 import pytest
 
-from fedifetcher.api.mastodon import MastodonApi
+from fedifetcher.api.mastodon import MastodonApi, to_list, to_post, to_user
 from fedifetcher.servers import ApiFlavour
 
 
 @pytest.fixture
 def api(http):
     return MastodonApi("example.social", http)
+
+WHEN = "2026-01-01T00:00:00.000Z"
+
+
+T = TypeVar("T")
+
+
+def built(thing: T | None) -> T:
+    """The builders drop what they cannot use; these tests are about the rest"""
+    assert thing is not None
+    return thing
 
 
 def test_it_claims_the_mastodon_flavour():
@@ -54,12 +68,13 @@ def test_user_id_reports_other_failures(api, http, reply):
 def test_user_posts_are_fetched_for_the_resolved_id(api, http, reply):
     http.get.side_effect = [
         reply(200, {"id": "1234"}),
-        reply(200, [{"url": "https://example.social/@someone/1"}]),
+        reply(200, [{"url": "https://example.social/@someone/1",
+                    "created_at": "2026-01-01T00:00:00.000Z"}]),
     ]
 
     posts = api.fetch_user_posts("someone", "https://example.social/@someone")
 
-    assert posts == [{"url": "https://example.social/@someone/1"}]
+    assert [post.url for post in posts] == ["https://example.social/@someone/1"]
     assert http.get.call_args[0][0] == (
         "https://example.social/api/v1/accounts/1234/statuses?limit=40"
     )
@@ -102,3 +117,159 @@ def test_context_is_empty_when_the_request_fails(api, http):
 def test_context_is_empty_when_the_body_makes_no_sense(api, http, reply):
     http.get.return_value = reply(200, {"unexpected": True})
     assert api.fetch_context_urls("9", "https://example.social/@a/9") == []
+
+
+def test_a_mastodon_status_keeps_what_it_was_given():
+    post = built(to_post({
+        "url": "https://remote.example/@a/1",
+        "uri": "https://remote.example/users/a/statuses/1",
+        "created_at": WHEN,
+        "visibility": "public",
+        "in_reply_to_id": "7",
+        "replies_count": 2,
+    }))
+
+    assert post.url == "https://remote.example/@a/1"
+    assert post.uri == "https://remote.example/users/a/statuses/1"
+    assert post.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+    assert post.is_public
+    assert post.in_reply_to_id == "7"
+    assert post.reply_count == 2
+
+
+@pytest.mark.parametrize(
+    "visibility,expected",
+    [("public", True), ("unlisted", True), ("private", False), ("direct", False)],
+)
+def test_only_posts_anyone_may_read_are_public(visibility, expected):
+    post = built(to_post({"url": "u", "created_at": WHEN, "visibility": visibility}))
+    assert post.is_public is expected
+
+
+def test_a_status_that_says_nothing_about_who_may_see_it_is_not_public():
+    assert built(to_post({"url": "u", "created_at": WHEN})).is_public is False
+
+
+def test_a_boost_carries_the_post_it_boosts():
+    post = built(to_post({
+        "url": "https://our.example/@a/1", "created_at": WHEN, "visibility": "public",
+        "reblog": {"url": "https://remote.example/@b/9", "created_at": WHEN,
+                   "visibility": "public"},
+    }))
+
+    assert post.is_boost
+    assert post.original.url == "https://remote.example/@b/9"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"created_at": WHEN},                    # nothing to address it by
+        {"url": "u"},                            # nothing to date it by
+        {"url": "u", "created_at": "not a date"},
+        {"url": "u", "created_at": None},
+    ],
+)
+def test_a_post_we_could_not_use_is_dropped(raw):
+    assert to_post(raw) is None
+
+
+def test_dropping_a_post_is_worth_saying_out_loud(caplog):
+    with caplog.at_level("DEBUG"):
+        to_post({"uri": "https://remote.example/1"})
+
+    assert "https://remote.example/1" in caplog.text
+
+
+def test_a_date_we_already_understand_is_left_alone():
+    when = datetime(2026, 6, 1, tzinfo=UTC)
+    assert built(to_post({"url": "u", "created_at": when})).created_at == when
+
+
+def account(**overrides):
+    raw = {"acct": "someone@remote.example", "url": "https://remote.example/@someone"}
+    return {**raw, **overrides}
+
+
+def test_an_account_keeps_what_it_was_given():
+    user = built(to_user(account(note="hello", indexable=False, discoverable=False)))
+
+    assert user.acct == "someone@remote.example"
+    assert user.url == "https://remote.example/@someone"
+    assert user.note == "hello"
+    assert not user.indexable
+    assert not user.discoverable
+
+
+def test_an_account_that_said_nothing_is_taken_to_have_agreed():
+    user = built(to_user(account()))
+
+    assert user.note == ""
+    assert user.indexable
+    assert user.discoverable
+
+
+def test_a_mention_is_an_account_too():
+    mention = built(to_user(
+        {"id": "1", "username": "someone", "acct": "someone@remote.example",
+         "url": "https://remote.example/@someone"}
+    ))
+
+    assert mention.acct == "someone@remote.example"
+
+
+def test_a_note_that_is_not_text_is_treated_as_no_note():
+    assert built(to_user(account(note=None))).note == ""
+
+
+@pytest.mark.parametrize("missing", ["acct", "url"])
+def test_an_account_we_cannot_name_or_reach_is_dropped(missing):
+    raw = account()
+    del raw[missing]
+
+    assert to_user(raw) is None
+
+
+def test_a_status_carries_who_wrote_it_and_who_it_names():
+    post = built(to_post({
+        "url": "u", "created_at": WHEN,
+        "in_reply_to_id": "7", "in_reply_to_account_id": "99",
+        "account": account(acct="author@remote.example"),
+        "mentions": [account(acct="mentioned@remote.example", id="99")],
+    }))
+
+    assert built(post.account).acct == "author@remote.example"
+    assert [m.acct for m in post.mentions] == ["mentioned@remote.example"]
+    # how a reply is matched to the account it answers
+    assert post.mentions[0].id == post.in_reply_to_account_id
+
+
+def test_a_status_that_names_nobody_carries_nobody():
+    post = built(to_post({"url": "u", "created_at": WHEN}))
+
+    assert post.account is None
+    assert post.mentions == ()
+
+
+def test_a_mention_we_cannot_use_is_dropped_without_losing_the_post():
+    post = built(to_post({
+        "url": "u", "created_at": WHEN,
+        "mentions": [{"id": "1"}, account(acct="fine@remote.example")],
+    }))
+
+    assert [m.acct for m in post.mentions] == ["fine@remote.example"]
+
+
+def test_a_list_is_its_id_and_what_the_owner_called_it():
+    user_list = built(to_list({"id": "42", "title": "Friends"}))
+
+    assert user_list.id == "42"
+    assert user_list.title == "Friends"
+
+
+def test_a_list_without_a_name_is_still_a_list_we_can_read():
+    assert built(to_list({"id": "42"})).title == ""
+
+
+def test_a_list_we_cannot_address_is_dropped():
+    assert to_list({"title": "Friends"}) is None

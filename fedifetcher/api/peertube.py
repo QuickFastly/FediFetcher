@@ -3,12 +3,35 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
+from fedifetcher.translate import parse_date, unusable, usable
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient
 
 logger = logging.getLogger("FediFetcher")
+
+# PeerTube says who may watch with a number: the rest of its VideoPrivacy enum
+# is 3 private, 4 internal and 5 password protected
+PUBLIC = (1, 2)  # public, unlisted
+
+
+def to_post(raw: dict[str, Any]) -> Post | None:
+    """A PeerTube video, whose comments are the replies to it"""
+    url = raw.get("url")
+    created_at = parse_date(raw.get("publishedAt") or raw.get("createdAt"))
+    if url is None or created_at is None:
+        unusable("peertube", raw.get("uuid"))
+        return None
+
+    privacy = raw.get("privacy") or {}
+    return Post(
+        url=url,
+        uri=raw.get("uri") or url,
+        created_at=created_at,
+        is_public=privacy.get("id", 1) in PUBLIC,
+    )
 
 
 class PeerTubeApi:
@@ -20,14 +43,14 @@ class PeerTubeApi:
         self.webserver = webserver
         self._http = http
 
-    def fetch_user_posts(
-        self, username: str, profile_url: str
-    ) -> list[dict[str, Any]] | None:
+    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         try:
             url = f'https://{self.webserver}/api/v1/accounts/{username}/videos'
             response = self._http.get(url)
             if response.status_code == 200:
-                return response.json()['data']
+                return usable(
+                    to_post(video) for video in response.json()['data']
+                )
 
             logger.error(f"Error getting posts by user {username} from {self.webserver}. Status Code: {response.status_code}")
             return None

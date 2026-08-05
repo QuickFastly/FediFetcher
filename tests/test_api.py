@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 
 from fedifetcher.api import CLIENTS, FediverseApi, LemmyApi, MastodonApi, client_for
@@ -28,6 +30,7 @@ def test_a_server_we_cannot_talk_to_gets_no_client(http):
 
 def test_the_chosen_client_is_bound_to_the_web_domain(http):
     client = client_for(server("mastodon"), http)
+    assert isinstance(client, MastodonApi)
     assert client.webserver == "example.social"
 
 
@@ -37,14 +40,14 @@ def test_mastodon_wins_when_a_server_claims_more_than_one_api(http):
         software="hybrid",
         version="1",
         apis=frozenset({ApiFlavour.MISSKEY, ApiFlavour.MASTODON}),
-        last_checked=None,
+        last_checked=datetime.now(),
     )
     assert isinstance(client_for(info, http), MastodonApi)
 
 
 def test_every_client_satisfies_the_protocol(http):
     for client in CLIENTS:
-        assert isinstance(client("example.social", http), FediverseApi)
+        assert isinstance(client("example.social", http), FediverseApi)  # type: ignore[call-arg]
 
 
 def test_every_flavour_has_a_client():

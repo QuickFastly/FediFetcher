@@ -1,14 +1,40 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
+from fedifetcher.translate import parse_date, unusable, usable
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient
 
 logger = logging.getLogger("FediFetcher")
+
+# "home" is Misskey's unlisted: public, but kept off the public timelines
+PUBLIC = ("public", "home")
+
+
+def to_post(raw: dict[str, Any], webserver: str) -> Post | None:
+    """A Misskey note, which only has a URL of its own when it is a copy"""
+    note_id = raw.get("id")
+    created_at = parse_date(raw.get("createdAt"))
+    if note_id is None or created_at is None:
+        unusable("misskey", note_id)
+        return None
+
+    url = raw.get("url") or f"https://{webserver}/notes/{note_id}"
+    renote = raw.get("renote")
+    return Post(
+        url=url,
+        uri=raw.get("uri") or url,
+        created_at=created_at,
+        is_public=raw.get("visibility") in PUBLIC,
+        reblog=to_post(renote, webserver) if renote is not None else None,
+        in_reply_to_id=raw.get("replyId"),
+        reply_count=raw.get("repliesCount"),
+    )
 
 
 class MisskeyApi:
@@ -20,9 +46,7 @@ class MisskeyApi:
         self.webserver = webserver
         self._http = http
 
-    def fetch_user_posts(
-        self, username: str, profile_url: str
-    ) -> list[dict[str, Any]] | None:
+    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         user_id = self._find_user_id(username)
         if user_id is None:
             return None
@@ -32,12 +56,9 @@ class MisskeyApi:
             resp = self._http.post(url, { 'userId': user_id, 'limit': 40 })
 
             if resp.status_code == 200:
-                notes = resp.json()
-                for note in notes:
-                    if note.get('url') is None:
-                        # add this to make it look like Mastodon status objects
-                        note.update({ 'url': f"https://{self.webserver}/notes/{note['id']}" })
-                return notes
+                return usable(
+                    to_post(note, self.webserver) for note in resp.json()
+                )
 
             logger.error(f"Error getting posts by user {username} from {self.webserver}. Status Code: {resp.status_code}")
             return None
@@ -59,7 +80,7 @@ class MisskeyApi:
 
             for user in resp.json():
                 if user['host'] is None:
-                    return user['id']
+                    return cast("str", user['id'])
         except Exception as ex:
             logger.error(f"Error finding user {username} from {self.webserver}. Exception: {ex}")
             return None

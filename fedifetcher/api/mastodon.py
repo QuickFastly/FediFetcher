@@ -3,16 +3,76 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 
 from dateutil import parser
 
+from fedifetcher.lists import UserList
+from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
+from fedifetcher.translate import parse_date, unusable, usable
+from fedifetcher.users import User
 
 if TYPE_CHECKING:
     from fedifetcher.http import HttpClient
 
 logger = logging.getLogger("FediFetcher")
+
+# a status anyone is allowed to read
+PUBLIC = ("public", "unlisted")
+
+
+def to_post(raw: dict[str, Any]) -> Post | None:
+    """A status from the Mastodon API, which our own server also speaks"""
+    url = raw.get("url")
+    created_at = parse_date(raw.get("created_at"))
+    if url is None or created_at is None:
+        unusable("mastodon", raw.get("uri"))
+        return None
+
+    boosted = raw.get("reblog")
+    return Post(
+        url=url,
+        uri=raw.get("uri") or url,
+        created_at=created_at,
+        is_public=raw.get("visibility") in PUBLIC,
+        reblog=to_post(boosted) if boosted is not None else None,
+        in_reply_to_id=raw.get("in_reply_to_id"),
+        in_reply_to_account_id=raw.get("in_reply_to_account_id"),
+        reply_count=raw.get("replies_count"),
+        account=to_user(raw["account"]) if raw.get("account") else None,
+        mentions=tuple(usable(to_user(m) for m in raw.get("mentions") or [])),
+    )
+
+
+def to_user(raw: dict[str, Any]) -> User | None:
+    """An account, either listed by our server or named by one of its posts"""
+    acct = raw.get("acct")
+    url = raw.get("url")
+    if acct is None or url is None:
+        unusable("mastodon", raw.get("id"))
+        return None
+
+    note = raw.get("note")
+    return User(
+        acct=acct,
+        url=url,
+        id=raw.get("id"),
+        note=note if isinstance(note, str) else "",
+        # absent means the account never said, which is not the same as no
+        indexable=raw.get("indexable", True),
+        discoverable=raw.get("discoverable", True),
+    )
+
+
+def to_list(raw: dict[str, Any]) -> UserList | None:
+    """One of the lists our own server keeps for the API key owner"""
+    list_id = raw.get("id")
+    if list_id is None:
+        unusable("mastodon", raw.get("title"))
+        return None
+
+    return UserList(id=list_id, title=raw.get("title") or "")
 
 
 class MastodonApi:
@@ -41,7 +101,7 @@ class MastodonApi:
         response = self._http.get(url, headers=headers)
 
         if response.status_code == 200:
-            return response.json()['id']
+            return cast("str", response.json()['id'])
         elif response.status_code == 404:
             raise Exception(
                 f"User {user} was not found on server {self.webserver}."
@@ -51,9 +111,7 @@ class MastodonApi:
                 f"Error getting URL {url}. Status code: {response.status_code}"
             )
 
-    def fetch_user_posts(
-        self, username: str, profile_url: str
-    ) -> list[dict[str, Any]] | None:
+    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
         try:
             user_id = self.user_id(username)
         except Exception as ex:
@@ -65,7 +123,7 @@ class MastodonApi:
             response = self._http.get(url)
 
             if(response.status_code == 200):
-                return response.json()
+                return usable(to_post(raw) for raw in response.json())
             elif response.status_code == 404:
                 raise Exception(
                     f"User {username} was not found on server {self.webserver}"
@@ -141,7 +199,7 @@ def get_paginated(
             headers.get('Authorization', '').replace("Bearer ", ""),
         )
 
-    result = response.json()
+    result: list[Any] = response.json()
 
     while _wants_more(result, stop_at) and 'next' in response.links:
         response = http.get(response.links['next']['url'], headers, timeout, max_tries)
@@ -185,46 +243,53 @@ class HomeServer:
     def user_id(self, user: str | None = None) -> str:
         return self._api.user_id(user, self._token)
 
-    def bookmarks(self, limit: int) -> list[Any]:
-        return self._paginated("/api/v1/bookmarks", limit)
+    def _posts(self, path: str, stop_at: int | datetime) -> list[Post]:
+        return usable(to_post(raw) for raw in self._paginated(path, stop_at))
 
-    def favourites(self, limit: int) -> list[Any]:
-        return self._paginated("/api/v1/favourites", limit)
+    def bookmarks(self, limit: int) -> list[Post]:
+        return self._posts("/api/v1/bookmarks", limit)
 
-    def follow_requests(self, limit: int) -> list[Any]:
-        return self._paginated("/api/v1/follow_requests", limit)
+    def favourites(self, limit: int) -> list[Post]:
+        return self._posts("/api/v1/favourites", limit)
 
-    def followers(self, user_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/accounts/{user_id}/followers", limit)
+    def _accounts(self, path: str, stop_at: int | datetime) -> list[User]:
+        return usable(to_user(raw) for raw in self._paginated(path, stop_at))
 
-    def following(self, user_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/accounts/{user_id}/following", limit)
+    def follow_requests(self, limit: int) -> list[User]:
+        return self._accounts("/api/v1/follow_requests", limit)
 
-    def lists(self) -> list[Any]:
-        return self._paginated("/api/v1/lists", 99)
+    def followers(self, user_id: str, limit: int) -> list[User]:
+        return self._accounts(f"/api/v1/accounts/{user_id}/followers", limit)
 
-    def list_timeline(self, list_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/timelines/list/{list_id}", limit)
+    def following(self, user_id: str, limit: int) -> list[User]:
+        return self._accounts(f"/api/v1/accounts/{user_id}/following", limit)
 
-    def list_accounts(self, list_id: str, limit: int) -> list[Any]:
-        return self._paginated(f"/api/v1/lists/{list_id}/accounts", limit)
+    def lists(self) -> list[UserList]:
+        return usable(to_list(raw) for raw in self._paginated("/api/v1/lists", 99))
 
-    def notification_accounts(self, since: datetime) -> list[Any]:
+    def list_timeline(self, list_id: str, limit: int) -> list[Post]:
+        return self._posts(f"/api/v1/timelines/list/{list_id}", limit)
+
+    def list_accounts(self, list_id: str, limit: int) -> list[User]:
+        return self._accounts(f"/api/v1/lists/{list_id}/accounts", limit)
+
+    def notification_accounts(self, since: datetime) -> list[User]:
         """Accounts appearing in notifications since the given time"""
         notifications = self._paginated("/api/v1/notifications", since)
-        accounts: list[Any] = []
+        accounts: list[User] = []
         for notification in notifications:
             when = parser.parse(notification['created_at'])
-            if when >= since and notification['account'] not in accounts:
-                accounts.append(notification['account'])
+            account = to_user(notification['account'])
+            if when >= since and account is not None and account not in accounts:
+                accounts.append(account)
         return accounts
 
-    def timeline(self, limit: int) -> list[Any]:
+    def timeline(self, limit: int) -> list[Post]:
         """Get all post in the user's home timeline"""
         url = f"https://{self.server}/api/v1/timelines/home"
         try:
             response = self._toots(url)
-            toots = response.json()
+            toots: list[Any] = response.json()
 
             # Paginate as needed
             while len(toots) < limit and 'next' in response.links:
@@ -235,7 +300,7 @@ class HomeServer:
             raise
 
         logger.info(f"Found {len(toots)} toots in timeline")
-        return toots
+        return usable(to_post(raw) for raw in toots)
 
     def _toots(self, url: str) -> Any:
         response = self._http.get(url, headers=self._auth)
@@ -264,7 +329,7 @@ class HomeServer:
                     logger.info(f"Found active user: {user['username']}")
                     yield user["id"]
 
-    def account_statuses(self, user_id: str) -> list[Any]:
+    def account_statuses(self, user_id: str) -> list[Post]:
         """Recent posts by one of our users, replies included"""
         url = f"https://{self.server}/api/v1/accounts/{user_id}/statuses?exclude_replies=false&limit=40"
         resp = self._http.get(url, headers=self._auth)
@@ -274,7 +339,7 @@ class HomeServer:
                 f"Error getting replies for user {user_id} on server {self.server}",
                 resp.status_code, self._token, "read:statuses",
             )
-        return resp.json()
+        return usable(to_post(raw) for raw in resp.json())
 
     def resolve(self, url: str) -> bool:
         """Ask our server to fetch a remote post, so it appears locally"""

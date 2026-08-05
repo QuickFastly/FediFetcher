@@ -1,5 +1,6 @@
 import logging
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -10,7 +11,15 @@ from fedifetcher.backfill import (
     filter_known_users,
     user_has_opted_out,
 )
+from fedifetcher.config import Config
 from fedifetcher.state import TimestampedSet
+from fedifetcher.users import User
+from tests.conftest import make_post, make_user
+
+
+def config_with(**settings: Any) -> Config:
+    """A Config stand-in carrying only the settings a test cares about"""
+    return cast("Config", SimpleNamespace(**settings))
 
 
 @patch("fedifetcher.backfill.get_user_posts")
@@ -20,14 +29,14 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts, state, home)
     config = Mock()
     http = Mock()
     followings = [
-        {"acct": "user1", "url": "https://user1.com"},
-        {"acct": "user2", "url": "https://test_server/user2"},
+        make_user(acct="user1", url="https://user1.com"),
+        make_user(acct="user2", url="https://test_server/user2"),
     ]
     known_followings = TimestampedSet()
 
     mock_get_posts.return_value = [
-        {"url": "https://user1.com/post1"},
-        {"url": "https://user1.com/post2"},
+        make_post(url="https://user1.com/post1"),
+        make_post(url="https://user1.com/post2"),
     ]
     mock_add_post.return_value = True
 
@@ -51,13 +60,13 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts, state, home)
 def test_add_user_posts_with_no_new_posts(mock_logger, mock_add_post, mock_get_posts, state, home):
     config = Mock()
     http = Mock()
-    followings = [{"acct": "user1", "url": "https://user1.com"}]
+    followings = [make_user(acct="user1", url="https://user1.com")]
     known_followings = TimestampedSet()
     state.seen_urls.update(["https://user1.com/post1", "https://user1.com/post2"])
 
     mock_get_posts.return_value = [
-        {"url": "https://user1.com/post1"},
-        {"url": "https://user1.com/post2"},
+        make_post(url="https://user1.com/post1"),
+        make_post(url="https://user1.com/post2"),
     ]
     mock_add_post.return_value = True
 
@@ -78,43 +87,36 @@ def test_add_post_with_context_post_not_added(state, home, http):
     home.resolve.return_value = False
     config = Mock()
 
-    post = {"url": "http://example.com"}
+    post = make_post(url="http://example.com")
     result = backfill.add_post_with_context(
         post, home, http=http, config=config, state=state
     )
 
-    home.resolve.assert_called_once_with(post["url"])
+    home.resolve.assert_called_once_with(post.url)
     assert result is False
 
 
 def test_user_has_opted_out():
-    assert not user_has_opted_out({"note": "I love robots"})
-    assert user_has_opted_out({"note": "I love robots, nobot"})
-    assert user_has_opted_out({"note": "/tags/nobot"})
-    assert user_has_opted_out({"indexable": False})
-    assert user_has_opted_out({"discoverable": False})
+    assert not user_has_opted_out(make_user())
+    assert not user_has_opted_out(make_user(note="I love robots"))
+    assert user_has_opted_out(make_user(note="I love robots, nobot"))
+    assert user_has_opted_out(make_user(note="/tags/nobot"))
+    assert user_has_opted_out(make_user(indexable=False))
+    assert user_has_opted_out(make_user(discoverable=False))
 
 
 def test_filter_known_users():
-    users = [
-        {"acct": "user1"},
-        {"acct": "user2"},
-        {"acct": "user3"},
-    ]
+    users = [make_user(acct=f"user{n}") for n in (1, 2, 3)]
     known_users = ["user1", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
 
-    assert filtered_users == [{"acct": "user2"}]
+    assert filtered_users == [make_user(acct="user2")]
 
 
 def test_filter_known_users_no_known_users():
-    users = [
-        {"acct": "user1"},
-        {"acct": "user2"},
-        {"acct": "user3"},
-    ]
-    known_users = []
+    users = [make_user(acct=f"user{n}") for n in (1, 2, 3)]
+    known_users: list[str] = []
 
     filtered_users = filter_known_users(users, known_users)
 
@@ -122,11 +124,7 @@ def test_filter_known_users_no_known_users():
 
 
 def test_filter_known_users_all_users_known():
-    users = [
-        {"acct": "user1"},
-        {"acct": "user2"},
-        {"acct": "user3"},
-    ]
+    users = [make_user(acct=f"user{n}") for n in (1, 2, 3)]
     known_users = ["user1", "user2", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
@@ -135,7 +133,7 @@ def test_filter_known_users_all_users_known():
 
 
 def test_filter_known_users_no_users():
-    users = []
+    users: list[User] = []
     known_users = ["user1", "user2", "user3"]
 
     filtered_users = filter_known_users(users, known_users)
@@ -144,7 +142,7 @@ def test_filter_known_users_no_users():
 
 
 def account(acct="someone@remote.example", url="https://remote.example/@someone", **extra):
-    return {"acct": acct, "url": url, **extra}
+    return make_user(acct=acct, url=url, **extra)
 
 
 def test_opted_out_users_are_left_alone(state, http, caplog):
@@ -219,7 +217,7 @@ def test_a_server_we_cannot_talk_to_yields_nothing(state, http):
 
 def test_posts_come_from_the_client_for_that_server(state, http):
     client = Mock()
-    client.fetch_user_posts.return_value = [{"url": "https://remote.example/@someone/1"}]
+    client.fetch_user_posts.return_value = [make_post()]
 
     with patch.object(backfill, "get_server_info", return_value=Mock()), \
          patch.object(backfill, "client_for", return_value=client):
@@ -227,7 +225,7 @@ def test_posts_come_from_the_client_for_that_server(state, http):
             account(), TimestampedSet(), "our.example", http=http, state=state
         )
 
-    assert posts == [{"url": "https://remote.example/@someone/1"}]
+    assert posts == [make_post()]
     client.fetch_user_posts.assert_called_once_with(
         "someone", "https://remote.example/@someone"
     )
@@ -235,10 +233,10 @@ def test_posts_come_from_the_client_for_that_server(state, http):
 
 def test_a_post_the_server_refuses_is_reported_as_not_added(state, home, http):
     home.resolve.return_value = False
-    config = SimpleNamespace(backfill_with_context=True)
+    config = config_with(backfill_with_context=True)
 
     added = backfill.add_post_with_context(
-        {"url": "https://remote.example/@a/1"}, home, http=http, config=config, state=state
+        make_post(url="https://remote.example/@a/1"), home, http=http, config=config, state=state
     )
 
     assert added is False
@@ -247,10 +245,10 @@ def test_a_post_the_server_refuses_is_reported_as_not_added(state, home, http):
 
 def test_an_added_post_is_remembered(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=False)
+    config = config_with(backfill_with_context=False)
 
     added = backfill.add_post_with_context(
-        {"url": "https://remote.example/@a/1"}, home, http=http, config=config, state=state
+        make_post(url="https://remote.example/@a/1"), home, http=http, config=config, state=state
     )
 
     assert added is True
@@ -259,8 +257,8 @@ def test_an_added_post_is_remembered(state, home, http):
 
 def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=True)
-    post = {"url": "https://remote.example/@a/1", "replies_count": 2}
+    config = config_with(backfill_with_context=True)
+    post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
     with patch.object(backfill, "parse_url", return_value=("remote.example", "1")), \
          patch.object(backfill, "get_all_known_context_urls", return_value=["u"]) as gather, \
@@ -273,8 +271,8 @@ def test_replies_are_pulled_in_when_context_is_wanted(state, home, http):
 
 def test_replies_are_left_alone_when_context_is_not_wanted(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=False)
-    post = {"url": "https://remote.example/@a/1", "replies_count": 2}
+    config = config_with(backfill_with_context=False)
+    post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
     with patch.object(backfill, "get_all_known_context_urls") as gather:
         backfill.add_post_with_context(post, home, http=http, config=config, state=state)
@@ -284,8 +282,8 @@ def test_replies_are_left_alone_when_context_is_not_wanted(state, home, http):
 
 def test_a_post_whose_url_we_cannot_parse_is_still_added(state, home, http):
     home.resolve.return_value = True
-    config = SimpleNamespace(backfill_with_context=True)
-    post = {"url": "https://remote.example/@a/1", "replies_count": 2}
+    config = config_with(backfill_with_context=True)
+    post = make_post(url="https://remote.example/@a/1", reply_count=2)
 
     with patch.object(backfill, "parse_url", return_value=None), \
          patch.object(backfill, "get_all_known_context_urls") as gather:
@@ -301,7 +299,10 @@ def test_a_user_is_only_marked_known_when_every_post_succeeded(state, home, http
     caplog.set_level(logging.INFO)
     config = Mock()
     target = TimestampedSet()
-    posts = [{"url": "https://remote.example/@a/1"}, {"url": "https://remote.example/@a/2"}]
+    posts = [
+        make_post(url="https://remote.example/@a/1"),
+        make_post(url="https://remote.example/@a/2"),
+    ]
 
     with patch.object(backfill, "get_user_posts", return_value=posts), \
          patch.object(backfill, "add_post_with_context", side_effect=[True, False]):
@@ -315,10 +316,10 @@ def test_a_user_is_only_marked_known_when_every_post_succeeded(state, home, http
 
 
 def test_reblogs_and_renotes_are_not_added(state, home, http):
+    # a Mastodon boost and a Misskey renote arrive as the same thing now
     posts = [
-        {"url": "https://remote.example/@a/1", "reblog": {"url": "x"}},
-        {"url": "https://remote.example/@a/2", "renoteId": "7"},
-        {"reblog": None},
+        make_post(url="https://remote.example/@a/1", reblog=make_post(url="x")),
+        make_post(url="https://remote.example/@a/2", reblog=make_post(url="y")),
     ]
 
     with patch.object(backfill, "get_user_posts", return_value=posts), \

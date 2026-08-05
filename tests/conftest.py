@@ -1,8 +1,32 @@
+from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
+from fedifetcher.posts import Post
 from fedifetcher.store import State
+from fedifetcher.users import User
+
+
+def make_post(**overrides: Any) -> Post:
+    """A Post that is fine in every way the test does not care about"""
+    fields: dict[str, Any] = {
+        "url": "https://remote.example/@someone/1",
+        "uri": "https://remote.example/@someone/1",
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "is_public": True,
+    }
+    return Post(**{**fields, **overrides})
+
+
+def make_user(**overrides: Any) -> User:
+    """A User who has not asked to be left alone, unless a test says so"""
+    fields: dict[str, Any] = {
+        "acct": "someone@remote.example",
+        "url": "https://remote.example/@someone",
+    }
+    return User(**{**fields, **overrides})
 
 
 @pytest.fixture
