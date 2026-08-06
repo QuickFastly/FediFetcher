@@ -72,7 +72,7 @@ def test_user_posts_are_fetched_for_the_resolved_id(api, http, reply):
                     "created_at": "2026-01-01T00:00:00.000Z"}]),
     ]
 
-    posts = api.fetch_user_posts("someone", "https://example.social/@someone")
+    posts = api.fetch_user_posts("someone", "https://example.social/@someone", 40)
 
     assert [post.url for post in posts] == ["https://example.social/@someone/1"]
     assert http.get.call_args[0][0] == (
@@ -80,14 +80,46 @@ def test_user_posts_are_fetched_for_the_resolved_id(api, http, reply):
     )
 
 
+def test_more_posts_than_a_page_are_asked_for_from_the_last_one(api, http, reply):
+    def status(n):
+        return {"id": str(n), "url": f"https://example.social/@someone/{n}",
+                "created_at": WHEN}
+
+    http.get.side_effect = [
+        reply(200, {"id": "1234"}),
+        reply(200, [status(n) for n in range(40)]),
+        reply(200, [status(40)]),
+    ]
+
+    posts = api.fetch_user_posts("someone", "https://example.social/@someone", 100)
+
+    assert len(posts) == 41
+    assert http.get.call_args_list[2][0][0] == (
+        "https://example.social/api/v1/accounts/1234/statuses?limit=40&max_id=39"
+    )
+
+
+def test_posts_from_a_page_we_cannot_read_are_kept(api, http, reply):
+    http.get.side_effect = [
+        reply(200, {"id": "1234"}),
+        reply(200, [{"id": str(n), "url": f"https://example.social/@someone/{n}",
+                     "created_at": WHEN} for n in range(40)]),
+        reply(500),
+    ]
+
+    posts = api.fetch_user_posts("someone", "https://example.social/@someone", 100)
+
+    assert len(posts) == 40
+
+
 def test_user_posts_give_up_when_the_id_cannot_be_found(api, http, reply):
     http.get.return_value = reply(404)
-    assert api.fetch_user_posts("nobody", "https://example.social/@nobody") is None
+    assert api.fetch_user_posts("nobody", "https://example.social/@nobody", 40) is None
 
 
 def test_user_posts_give_up_on_an_error_status(api, http, reply):
     http.get.side_effect = [reply(200, {"id": "1234"}), reply(500)]
-    assert api.fetch_user_posts("someone", "https://example.social/@someone") is None
+    assert api.fetch_user_posts("someone", "https://example.social/@someone", 40) is None
 
 
 def test_context_gathers_ancestors_and_descendants(api, http, reply):

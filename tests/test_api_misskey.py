@@ -28,7 +28,7 @@ def test_user_posts_are_fetched_for_the_local_account(api, http, reply):
         reply(200, [{"id": "note1", "createdAt": "2026-01-01T00:00:00Z"}]),
     ]
 
-    notes = api.fetch_user_posts("someone", "https://misskey.example/@someone")
+    notes = api.fetch_user_posts("someone", "https://misskey.example/@someone", 40)
 
     assert [note.url for note in notes] == ["https://misskey.example/notes/note1"]
     assert http.post.call_args_list[1][0][1] == {"userId": "local", "limit": 40}
@@ -41,24 +41,55 @@ def test_a_note_that_knows_its_url_keeps_it(api, http, reply):
                     "createdAt": "2026-01-01T00:00:00Z"}]),
     ]
 
-    notes = api.fetch_user_posts("someone", "https://misskey.example/@someone")
+    notes = api.fetch_user_posts("someone", "https://misskey.example/@someone", 40)
 
     assert notes[0].url == "https://elsewhere/notes/note1"
 
 
+def test_more_notes_than_a_page_are_asked_for_from_the_last_one(api, http, reply):
+    def note(n):
+        return {"id": f"note{n}", "createdAt": "2026-01-01T00:00:00Z"}
+
+    http.post.side_effect = [
+        reply(200, [{"id": "local", "host": None}]),
+        reply(200, [note(n) for n in range(100)]),
+        reply(200, [note(100)]),
+    ]
+
+    notes = api.fetch_user_posts("someone", "https://misskey.example/@someone", 150)
+
+    assert len(notes) == 101
+    assert http.post.call_args_list[2][0][1] == {
+        "userId": "local", "limit": 50, "untilId": "note99",
+    }
+
+
+def test_notes_from_a_page_we_cannot_read_are_kept(api, http, reply):
+    http.post.side_effect = [
+        reply(200, [{"id": "local", "host": None}]),
+        reply(200, [{"id": f"note{n}", "createdAt": "2026-01-01T00:00:00Z"}
+                    for n in range(100)]),
+        reply(500),
+    ]
+
+    notes = api.fetch_user_posts("someone", "https://misskey.example/@someone", 150)
+
+    assert len(notes) == 100
+
+
 def test_user_posts_give_up_when_the_account_is_not_found(api, http, reply):
     http.post.return_value = reply(200, [{"id": "remote", "host": "elsewhere"}])
-    assert api.fetch_user_posts("someone", "https://misskey.example/@someone") is None
+    assert api.fetch_user_posts("someone", "https://misskey.example/@someone", 40) is None
 
 
 def test_user_posts_give_up_on_a_search_error(api, http, reply):
     http.post.return_value = reply(500)
-    assert api.fetch_user_posts("someone", "https://misskey.example/@someone") is None
+    assert api.fetch_user_posts("someone", "https://misskey.example/@someone", 40) is None
 
 
 def test_user_posts_give_up_when_the_request_fails(api, http):
     http.post.side_effect = Exception("no route to host")
-    assert api.fetch_user_posts("someone", "https://misskey.example/@someone") is None
+    assert api.fetch_user_posts("someone", "https://misskey.example/@someone", 40) is None
 
 
 def test_context_combines_children_and_conversation(api, http, reply):

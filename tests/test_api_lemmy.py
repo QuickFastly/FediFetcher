@@ -27,7 +27,7 @@ def test_community_posts_are_read_from_the_community_endpoint(api, http, reply):
         {"post": {"ap_id": "https://lemmy.world/post/1", "published": "2026-01-01T00:00:00Z"}},
     ]})
 
-    posts = api.fetch_user_posts("news", "https://lemmy.world/c/news")
+    posts = api.fetch_user_posts("news", "https://lemmy.world/c/news", 40)
 
     assert [post.url for post in posts] == ["https://lemmy.world/post/1"]
     assert "community_name=news" in http.get.call_args[0][0]
@@ -39,7 +39,7 @@ def test_account_posts_combine_posts_and_comments(api, http, reply):
         "posts": [{"post": {"ap_id": "https://lemmy.world/post/2", "published": "2026-01-01T00:00:00Z"}}],
     })
 
-    posts = api.fetch_user_posts("someone", "https://lemmy.world/u/someone")
+    posts = api.fetch_user_posts("someone", "https://lemmy.world/u/someone", 40)
 
     assert [p.url for p in posts] == [
         "https://lemmy.world/comment/1",
@@ -47,14 +47,45 @@ def test_account_posts_combine_posts_and_comments(api, http, reply):
     ]
 
 
+def test_more_community_posts_than_a_page_are_asked_for_by_page_number(api, http, reply):
+    def entry(n):
+        return {"post": {"ap_id": f"https://lemmy.world/post/{n}", "published": WHEN}}
+
+    http.get.side_effect = [
+        reply(200, {"posts": [entry(n) for n in range(50)]}),
+        reply(200, {"posts": [entry(50)]}),
+    ]
+
+    posts = api.fetch_user_posts("news", "https://lemmy.world/c/news", 100)
+
+    assert len(posts) == 51
+    assert "page=2" in http.get.call_args[0][0]
+
+
+def test_more_account_posts_than_a_page_are_asked_for_by_page_number(api, http, reply):
+    def entry(n):
+        return {"post": {"ap_id": f"https://lemmy.world/post/{n}", "published": WHEN}}
+
+    http.get.side_effect = [
+        reply(200, {"comments": [entry(n) for n in range(30)],
+                    "posts": [entry(n) for n in range(30, 60)]}),
+        reply(200, {"comments": [], "posts": [entry(60)]}),
+    ]
+
+    posts = api.fetch_user_posts("someone", "https://lemmy.world/u/someone", 100)
+
+    assert len(posts) == 61
+    assert "page=2" in http.get.call_args[0][0]
+
+
 def test_an_unrecognised_profile_url_yields_nothing(api, http):
-    assert api.fetch_user_posts("someone", "https://lemmy.world/x/someone") is None
+    assert api.fetch_user_posts("someone", "https://lemmy.world/x/someone", 40) is None
     http.get.assert_not_called()
 
 
 def test_user_posts_give_up_when_the_request_fails(api, http):
     http.get.side_effect = Exception("no route to host")
-    assert api.fetch_user_posts("someone", "https://lemmy.world/u/someone") is None
+    assert api.fetch_user_posts("someone", "https://lemmy.world/u/someone", 40) is None
 
 
 def test_post_context_lists_the_post_and_its_comments(api, http, reply):

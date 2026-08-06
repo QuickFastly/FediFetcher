@@ -36,8 +36,14 @@ class FediverseApi(Protocol):
         """
         ...
 
-    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
-        """Recent posts by an account, or None if they could not be read"""
+    def fetch_user_posts(
+        self, username: str, profile_url: str, limit: int
+    ) -> list[Post] | None:
+        """At most `limit` recent posts by an account, or None if unreadable.
+
+        Servers hand these out a page at a time, so anything beyond the first
+        page costs another request to a server that is not ours.
+        """
         ...
 
     def fetch_context_urls(self, post_id: str, post_url: str) -> list[str]:

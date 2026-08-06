@@ -10,3 +10,6 @@ coverage.xml
 .pytest_cache
 .ruff_cache
 docs/DESIGN.md
+build/
+dist/
+*.egg-info/
