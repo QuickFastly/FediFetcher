@@ -1,7 +1,7 @@
 {
   "server": "m.tripulse.link",
   "instance-blocklist": "misskey.io,akko.wtf,fed.brid.gy,pleroma.laru.dsrv.x7q.eu,yeen.town",
-  "home-timeline-length": 80,
+  "home-timeline-length": 160,
   "max-followings": 100,
   "max-bookmarks": 100,
   "from-notifications": 1,
