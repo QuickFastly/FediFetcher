@@ -45,7 +45,8 @@ def test_add_user_posts(mock_logger, mock_add_post, mock_get_posts, state, home)
     )
 
     mock_get_posts.assert_called_once_with(
-        followings[0], known_followings, home.server, http=http, state=state
+        followings[0], known_followings, home.server, http=http, config=config,
+        state=state
     )
     assert mock_add_post.call_count == 2
     assert len(state.seen_urls) == 2
@@ -75,7 +76,8 @@ def test_add_user_posts_with_no_new_posts(mock_logger, mock_add_post, mock_get_p
     )
 
     mock_get_posts.assert_called_once_with(
-        followings[0], known_followings, home.server, http=http, state=state
+        followings[0], known_followings, home.server, http=http, config=config,
+        state=state
     )
     mock_add_post.assert_not_called()
     assert len(state.seen_urls) == 2
@@ -141,16 +143,22 @@ def test_filter_known_users_no_users():
     assert filtered_users == []
 
 
+@pytest.fixture
+def config():
+    """The settings backfilling reads while gathering a user's posts"""
+    return config_with(max_posts_per_account=40)
+
+
 def account(acct="someone@remote.example", url="https://remote.example/@someone", **extra):
     return make_user(acct=acct, url=url, **extra)
 
 
-def test_opted_out_users_are_left_alone(state, http, caplog):
+def test_opted_out_users_are_left_alone(state, http, caplog, config):
     caplog.set_level(logging.DEBUG)
     target = TimestampedSet()
 
     posts = backfill.get_user_posts(
-        account(note="please no bots, nobot"), target, "our.example", http=http, state=state
+        account(note="please no bots, nobot"), target, "our.example", http=http, config=config, state=state
     )
 
     assert posts is None
@@ -162,30 +170,30 @@ def test_opted_out_users_are_left_alone(state, http, caplog):
 @pytest.mark.parametrize(
     "flag", [{"indexable": False}, {"discoverable": False}]
 )
-def test_users_who_hid_themselves_are_left_alone(flag, state, http):
+def test_users_who_hid_themselves_are_left_alone(flag, state, http, config):
     assert backfill.get_user_posts(
-        account(**flag), TimestampedSet(), "our.example", http=http, state=state
+        account(**flag), TimestampedSet(), "our.example", http=http, config=config, state=state
     ) is None
 
 
-def test_an_unparseable_profile_url_is_remembered_so_we_stop_retrying(state, http):
+def test_an_unparseable_profile_url_is_remembered_so_we_stop_retrying(state, http, config):
     target = TimestampedSet()
 
     posts = backfill.get_user_posts(
-        account(url="not a url"), target, "our.example", http=http, state=state
+        account(url="not a url"), target, "our.example", http=http, config=config, state=state
     )
 
     assert posts is None
     assert "someone@remote.example" in target
 
 
-def test_our_own_users_are_skipped(state, http, caplog):
+def test_our_own_users_are_skipped(state, http, caplog, config):
     caplog.set_level(logging.DEBUG)
     target = TimestampedSet()
 
     posts = backfill.get_user_posts(
         account(url="https://our.example/@someone"), target, "our.example",
-        http=http, state=state,
+        http=http, config=config, state=state,
     )
 
     assert posts is None
@@ -193,12 +201,12 @@ def test_our_own_users_are_skipped(state, http, caplog):
     assert "someone@remote.example" in target
 
 
-def test_a_server_we_cannot_reach_is_not_remembered(state, http, caplog):
+def test_a_server_we_cannot_reach_is_not_remembered(state, http, caplog, config):
     target = TimestampedSet()
 
     with patch.object(backfill, "get_server_info", return_value=None):
         posts = backfill.get_user_posts(
-            account(), target, "our.example", http=http, state=state
+            account(), target, "our.example", http=http, config=config, state=state
         )
 
     assert posts is None
@@ -207,15 +215,15 @@ def test_a_server_we_cannot_reach_is_not_remembered(state, http, caplog):
     assert "someone@remote.example" not in target
 
 
-def test_a_server_we_cannot_talk_to_yields_nothing(state, http):
+def test_a_server_we_cannot_talk_to_yields_nothing(state, http, config):
     with patch.object(backfill, "get_server_info", return_value=Mock()), \
          patch.object(backfill, "client_for", return_value=None):
         assert backfill.get_user_posts(
-            account(), TimestampedSet(), "our.example", http=http, state=state
+            account(), TimestampedSet(), "our.example", http=http, config=config, state=state
         ) is None
 
 
-def test_posts_come_from_the_client_for_that_server(state, http):
+def test_posts_come_from_the_client_for_that_server(state, http, config):
     client = Mock()
     client.username_from.return_value = "someone"
     client.fetch_user_posts.return_value = [make_post()]
@@ -223,12 +231,12 @@ def test_posts_come_from_the_client_for_that_server(state, http):
     with patch.object(backfill, "get_server_info", return_value=Mock()), \
          patch.object(backfill, "client_for", return_value=client):
         posts = backfill.get_user_posts(
-            account(), TimestampedSet(), "our.example", http=http, state=state
+            account(), TimestampedSet(), "our.example", http=http, config=config, state=state
         )
 
     assert posts == [make_post()]
     client.fetch_user_posts.assert_called_once_with(
-        "someone", "https://remote.example/@someone"
+        "someone", "https://remote.example/@someone", 40
     )
 
 

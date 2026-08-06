@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast
 
 from dateutil import parser
 
+from fedifetcher.api.paging import in_pages
 from fedifetcher.lists import UserList
 from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
@@ -21,6 +22,9 @@ logger = logging.getLogger("FediFetcher")
 
 # a status anyone is allowed to read
 PUBLIC = ("public", "unlisted")
+
+# the most statuses this API will hand out at once
+PAGE_SIZE = 40
 
 # one flavour, several ways of naming an account: Mastodon and its kin use
 # @name, Pleroma and Akkoma /users/name, and Pixelfed no prefix at all. The
@@ -147,30 +151,42 @@ class MastodonApi:
             return first_name_in(REDIRECTED_NOTICE, redirect)
         return first_name_in(POST_PATHS, post_url)
 
-    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
+    def fetch_user_posts(
+        self, username: str, profile_url: str, limit: int
+    ) -> list[Post] | None:
         try:
             user_id = self.user_id(username)
         except Exception as ex:
             logger.error(f"Error getting user ID for user {username}: {ex}")
             return None
 
-        try:
-            url = f"https://{self.webserver}/api/v1/accounts/{user_id}/statuses?limit=40"
-            response = self._http.get(url)
+        raw = in_pages(
+            lambda wanted, gathered: self._statuses(user_id, username, wanted, gathered),
+            limit,
+            PAGE_SIZE,
+        )
+        return None if raw is None else usable(to_post(status) for status in raw)
 
-            if(response.status_code == 200):
-                return usable(to_post(raw) for raw in response.json())
-            elif response.status_code == 404:
-                raise Exception(
-                    f"User {username} was not found on server {self.webserver}"
-                )
-            else:
-                raise Exception(
-                    f"Error getting URL {url}. Status code: {response.status_code}"
-                )
+    def _statuses(
+        self, user_id: str, username: str, wanted: int, gathered: list[Any]
+    ) -> list[Any] | None:
+        url = f"https://{self.webserver}/api/v1/accounts/{user_id}/statuses?limit={wanted}"
+        try:
+            if gathered:
+                # everything older than the oldest status we already have
+                url += f"&max_id={gathered[-1]['id']}"
+
+            response = self._http.get(url)
+            if response.status_code == 200:
+                return cast("list[Any]", response.json())
+
+            logger.error(
+                f"Error getting posts for user {username}. "
+                f"Error getting URL {url}. Status code: {response.status_code}"
+            )
         except Exception as ex:
             logger.error(f"Error getting posts for user {username}: {ex}")
-            return None
+        return None
 
     def fetch_context_urls(self, post_id: str, post_url: str) -> list[str]:
         url = f"https://{self.webserver}/api/v1/statuses/{post_id}/context"
@@ -223,7 +239,9 @@ def get_paginated(
 
     The header our server sends is the only way through most of these: a
     bookmark, favourite or follow is paged by the id of the record that made
-    it, which is an internal number the entries themselves never mention.
+    it, which is an internal number the entries themselves never mention. That
+    is why this asks to be pointed at the next page rather than working it out
+    of what it has, as we have to for other people's servers.
 
     `stop_at` is either how many entries are wanted, or the oldest creation
     date worth having.

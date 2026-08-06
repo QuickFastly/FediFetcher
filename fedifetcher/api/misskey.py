@@ -4,6 +4,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from fedifetcher.api.paging import in_pages
 from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
 from fedifetcher.translate import first_name_in, parse_date, unusable, usable
@@ -15,6 +16,9 @@ logger = logging.getLogger("FediFetcher")
 
 # "home" is Misskey's unlisted: public, but kept off the public timelines
 PUBLIC = ("public", "home")
+
+# the most notes this API will hand out at once
+PAGE_SIZE = 100
 
 PROFILE_PATHS = (re.compile(r"^https://[^/]+/@(?P<name>[^/]+)"),)
 POST_PATHS = (re.compile(r"^https://[^/]+/notes/(?P<name>[^/]+)"),)
@@ -56,25 +60,41 @@ class MisskeyApi:
     def post_id_from(self, post_url: str) -> str | None:
         return first_name_in(POST_PATHS, post_url)
 
-    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
+    def fetch_user_posts(
+        self, username: str, profile_url: str, limit: int
+    ) -> list[Post] | None:
         user_id = self._find_user_id(username)
         if user_id is None:
             return None
 
+        raw = in_pages(
+            lambda wanted, gathered: self._notes(user_id, username, wanted, gathered),
+            limit,
+            PAGE_SIZE,
+        )
+        if raw is None:
+            return None
+        return usable(to_post(note, self.webserver) for note in raw)
+
+    def _notes(
+        self, user_id: str, username: str, wanted: int, gathered: list[Any]
+    ) -> list[Any] | None:
         try:
+            params: dict[str, Any] = { 'userId': user_id, 'limit': wanted }
+            if gathered:
+                # everything older than the oldest note we already have
+                params['untilId'] = gathered[-1]['id']
+
             url = f'https://{self.webserver}/api/users/notes'
-            resp = self._http.post(url, { 'userId': user_id, 'limit': 40 })
+            resp = self._http.post(url, params)
 
             if resp.status_code == 200:
-                return usable(
-                    to_post(note, self.webserver) for note in resp.json()
-                )
+                return cast("list[Any]", resp.json())
 
             logger.error(f"Error getting posts by user {username} from {self.webserver}. Status Code: {resp.status_code}")
-            return None
         except Exception as ex:
             logger.error(f"Error getting posts by user {username} from {self.webserver}. Exception: {ex}")
-            return None
+        return None
 
     def _find_user_id(self, username: str) -> str | None:
         # query user info via search api

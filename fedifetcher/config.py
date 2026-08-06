@@ -93,6 +93,8 @@ class Config:
     max_list_accounts: int = opt(10,
         help="Determines how many accounts we'll backfill for in each list. This will be ignored, unless you also provide `from-lists = 1`. Set to `0` if you only want to fetch replies in lists.")
 
+    max_posts_per_account: int = opt(40,
+        help="How many posts to fetch from each account we backfill. Anything above the 40 we fetch by default means more requests to the remote server, and more requests to your own server to pull each post in, so raising this will make FediFetcher considerably slower.")
     backfill_with_context: bool = opt(True,
         help="If enabled, we'll fetch remote replies when backfilling profiles. Set to `0` to disable.")
     backfill_mentioned_users: bool = opt(True,

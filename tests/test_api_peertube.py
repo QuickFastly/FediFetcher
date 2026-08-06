@@ -29,22 +29,39 @@ def test_user_posts_are_the_accounts_videos(api, http, reply):
         {"url": "https://video.example/videos/watch/1", "publishedAt": "2026-01-01T00:00:00Z"},
     ]})
 
-    videos = api.fetch_user_posts("channel", "https://video.example/accounts/channel")
+    videos = api.fetch_user_posts("channel", "https://video.example/accounts/channel", 40)
 
     assert [video.url for video in videos] == ["https://video.example/videos/watch/1"]
     assert http.get.call_args[0][0] == (
-        "https://video.example/api/v1/accounts/channel/videos"
+        "https://video.example/api/v1/accounts/channel/videos?start=0&count=40"
+    )
+
+
+def test_more_videos_than_a_page_are_asked_for_from_where_we_got_to(api, http, reply):
+    def video(n):
+        return {"url": f"https://video.example/videos/watch/{n}", "publishedAt": WHEN}
+
+    http.get.side_effect = [
+        reply(200, {"data": [video(n) for n in range(100)]}),
+        reply(200, {"data": [video(100)]}),
+    ]
+
+    videos = api.fetch_user_posts("channel", "https://video.example/accounts/channel", 150)
+
+    assert len(videos) == 101
+    assert http.get.call_args[0][0] == (
+        "https://video.example/api/v1/accounts/channel/videos?start=100&count=50"
     )
 
 
 def test_user_posts_give_up_on_an_error_status(api, http, reply):
     http.get.return_value = reply(500)
-    assert api.fetch_user_posts("channel", "https://video.example/accounts/channel") is None
+    assert api.fetch_user_posts("channel", "https://video.example/accounts/channel", 40) is None
 
 
 def test_user_posts_give_up_when_the_request_fails(api, http):
     http.get.side_effect = Exception("no route to host")
-    assert api.fetch_user_posts("channel", "https://video.example/accounts/channel") is None
+    assert api.fetch_user_posts("channel", "https://video.example/accounts/channel", 40) is None
 
 
 def test_context_is_the_comment_threads(api, http, reply):
@@ -109,9 +126,11 @@ def test_videos_are_asked_for_from_the_right_collection(api, http, reply, profil
     http.get.return_value = reply(200, {"data": []})
     name = profile_url.rsplit("/", 1)[1]
 
-    api.fetch_user_posts(name, profile_url)
+    api.fetch_user_posts(name, profile_url, 40)
 
-    assert http.get.call_args[0][0] == f"https://video.example/api/v1/{endpoint}/videos"
+    assert http.get.call_args[0][0] == (
+        f"https://video.example/api/v1/{endpoint}/videos?start=0&count=40"
+    )
 
 
 @pytest.mark.parametrize(

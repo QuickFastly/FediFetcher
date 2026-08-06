@@ -18,6 +18,8 @@ def test_defaults_apply_when_nothing_is_given():
     assert config.access_tokens == ("token",)
     assert config.home_timeline_length == 0
     assert config.remember_users_for_hours == 24 * 7
+    # one page of posts per account, as it was before it could be asked for more
+    assert config.max_posts_per_account == 40
 
 
 def test_server_given_as_url_is_reduced_to_a_hostname():

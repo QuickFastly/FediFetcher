@@ -42,6 +42,7 @@ def get_user_posts(
     server: str,
     *,
     http: HttpClient,
+    config: Config,
     state: State,
 ) -> list[Post] | None:
     if user_has_opted_out(user):
@@ -76,7 +77,7 @@ def get_user_posts(
         target.add(user.acct)
         return None
 
-    return client.fetch_user_posts(username, user.url)
+    return client.fetch_user_posts(username, user.url, config.max_posts_per_account)
 
 def add_post_with_context(
     post: Post, home: HomeServer, *, http: HttpClient, config: Config, state: State
@@ -105,7 +106,9 @@ def add_user_posts(
 ) -> None:
     for user in followings:
         if user.acct not in state.all_known_users and not user.url.startswith(f"https://{home.server}/"):
-            posts = get_user_posts(user, target, home.server, http=http, state=state)
+            posts = get_user_posts(
+                user, target, home.server, http=http, config=config, state=state
+            )
 
             if(posts is not None):
                 count = 0

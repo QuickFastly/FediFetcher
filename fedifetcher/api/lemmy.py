@@ -4,14 +4,20 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from fedifetcher.api.paging import in_pages
 from fedifetcher.posts import Post
 from fedifetcher.servers import ApiFlavour
 from fedifetcher.translate import first_name_in, parse_date, unusable, usable
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from fedifetcher.http import HttpClient
 
 logger = logging.getLogger("FediFetcher")
+
+# the most entries this API will hand out at once
+PAGE_SIZE = 50
 
 COMMUNITY_PATH = re.compile(r"^https://[^/]+/c/")
 USER_PATH = re.compile(r"^https://[^/]+/u/")
@@ -47,42 +53,60 @@ class LemmyApi:
     def post_id_from(self, post_url: str) -> str | None:
         return first_name_in(POST_PATHS, post_url)
 
-    def fetch_user_posts(self, username: str, profile_url: str) -> list[Post] | None:
+    def fetch_user_posts(
+        self, username: str, profile_url: str, limit: int
+    ) -> list[Post] | None:
         if COMMUNITY_PATH.match(profile_url):
-            return self._fetch_community_posts(username)
+            return self._fetch_community_posts(username, limit)
         if USER_PATH.match(profile_url):
-            return self._fetch_account_posts(username)
+            return self._fetch_account_posts(username, limit)
 
         logger.error(f"Unknown Lemmy profile URL type {profile_url}")
         return None
 
-    def _fetch_community_posts(self, username: str) -> list[Post] | None:
-        try:
-            url = f"https://{self.webserver}/api/v3/post/list?community_name={username}&sort=New&limit=50"
-            response = self._http.get(url)
+    def _fetch_community_posts(self, username: str, limit: int) -> list[Post] | None:
+        return self._paged(
+            f"post/list?community_name={username}",
+            lambda body: [entry['post'] for entry in body['posts']],
+            limit,
+            f"community posts for community {username}",
+        )
 
-            if(response.status_code == 200):
-                return usable(
-                    to_post(post['post']) for post in response.json()['posts']
-                )
-        except Exception as ex:
-            logger.error(f"Error getting community posts for community {username}: {ex}")
-        return None
+    def _fetch_account_posts(self, username: str, limit: int) -> list[Post] | None:
+        # an account's page holds up to a full page of each, so a page short of
+        # what was asked for has run out of both, which is what ends the paging
+        return self._paged(
+            f"user?username={username}",
+            lambda body: [entry['post'] for entry in body['comments'] + body['posts']],
+            limit,
+            f"user posts for user {username}",
+        )
 
-    def _fetch_account_posts(self, username: str) -> list[Post] | None:
-        try:
-            url = f"https://{self.webserver}/api/v3/user?username={username}&sort=New&limit=50"
-            response = self._http.get(url)
+    def _paged(
+        self,
+        path: str,
+        entries: Callable[[Any], list[Any]],
+        limit: int,
+        describe: str,
+    ) -> list[Post] | None:
+        """Read a collection, which Lemmy numbers the pages of rather than
+        pointing at the next one, so where we got to is a page count."""
 
-            if(response.status_code == 200):
-                body = response.json()
-                return usable(
-                    to_post(entry['post'])
-                    for entry in body['comments'] + body['posts']
-                )
-        except Exception as ex:
-            logger.error(f"Error getting user posts for user {username}: {ex}")
-        return None
+        def page(wanted: int, gathered: list[Any]) -> list[Any] | None:
+            try:
+                url = f"https://{self.webserver}/api/v3/{path}&sort=New&limit={wanted}&page={len(gathered) // PAGE_SIZE + 1}"
+                response = self._http.get(url)
+
+                if(response.status_code == 200):
+                    return entries(response.json())
+
+                logger.error(f"Error getting {describe}. Status code: {response.status_code}")
+            except Exception as ex:
+                logger.error(f"Error getting {describe}: {ex}")
+            return None
+
+        raw = in_pages(page, limit, PAGE_SIZE)
+        return None if raw is None else usable(to_post(post) for post in raw)
 
     def fetch_context_urls(self, post_id: str, post_url: str) -> list[str]:
         if "/comment/" in post_url:
