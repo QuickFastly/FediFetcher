@@ -123,6 +123,12 @@ def test_the_timeline_is_paginated_to_the_requested_length(home, http):
     assert urls(home.timeline(4)) == [f"https://example.social/@a/{n}" for n in (1, 2, 3, 4)]
 
 
+def test_the_timeline_names_the_scope_it_needs(home, http, reply):
+    http.get.return_value = reply(403)
+    with pytest.raises(Exception, match="read:statuses"):
+        home.timeline(4)
+
+
 def test_active_user_ids_are_those_who_posted_recently(home, http):
     recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     old = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")

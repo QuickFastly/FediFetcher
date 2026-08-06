@@ -217,45 +217,45 @@ def report_mastodon_error(
 def get_paginated(
     url: str, stop_at: int | datetime, headers: Mapping[str, str] | None = None,
     timeout: int | None = None, max_tries: int = 5, *, http: HttpClient,
+    required_scope: str = '',
 ) -> list[Any]:
     """Follow a Mastodon collection across pages.
+
+    The header our server sends is the only way through most of these: a
+    bookmark, favourite or follow is paged by the id of the record that made
+    it, which is an internal number the entries themselves never mention.
 
     `stop_at` is either how many entries are wanted, or the oldest creation
     date worth having.
     """
     headers = headers or {}
-    furl = f"{url}?limit={stop_at}" if isinstance(stop_at, int) else url
+    next_url = f"{url}?limit={stop_at}" if isinstance(stop_at, int) else url
 
-    response = http.get(furl, headers, timeout, max_tries)
-
-    if response.status_code != 200:
-        report_mastodon_error(
-            f"Error getting URL {url}",
-            response.status_code,
-            headers.get('Authorization', '').replace("Bearer ", ""),
-        )
-
-    result: list[Any] = response.json()
-
-    while _wants_more(result, stop_at) and 'next' in response.links:
-        response = http.get(response.links['next']['url'], headers, timeout, max_tries)
+    result: list[Any] = []
+    while True:
+        response = http.get(next_url, headers, timeout, max_tries)
         if response.status_code != 200:
-            raise Exception(
-                f"Error getting URL {response.url}. \
-                    Status code: {response.status_code}"
+            report_mastodon_error(
+                f"Error getting URL {next_url}",
+                response.status_code,
+                headers.get('Authorization', '').replace("Bearer ", ""),
+                required_scope,
             )
-        page = response.json()
-        if not isinstance(page, list):
-            break
-        result += page
 
-    return result
+        page = response.json()
+        if not isinstance(page, list) or not page:
+            return result
+
+        result += page
+        if not _wants_more(result, stop_at) or 'next' not in response.links:
+            return result
+        next_url = response.links['next']['url']
 
 
 def _wants_more(result: list[Any], stop_at: int | datetime) -> bool:
     if isinstance(stop_at, int):
         return len(result) < stop_at
-    return bool(result) and parser.parse(result[-1]['created_at']) >= stop_at
+    return parser.parse(result[-1]['created_at']) >= stop_at
 
 
 class HomeServer:
@@ -271,16 +271,23 @@ class HomeServer:
     def _auth(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
 
-    def _paginated(self, path: str, stop_at: int | datetime) -> list[Any]:
+    def _paginated(
+        self, path: str, stop_at: int | datetime, required_scope: str = ''
+    ) -> list[Any]:
         return get_paginated(
-            f"https://{self.server}{path}", stop_at, self._auth, http=self._http
+            f"https://{self.server}{path}", stop_at, self._auth, http=self._http,
+            required_scope=required_scope,
         )
 
     def user_id(self, user: str | None = None) -> str:
         return self._api.user_id(user, self._token)
 
-    def _posts(self, path: str, stop_at: int | datetime) -> list[Post]:
-        return usable(to_post(raw) for raw in self._paginated(path, stop_at))
+    def _posts(
+        self, path: str, stop_at: int | datetime, required_scope: str = ''
+    ) -> list[Post]:
+        return usable(
+            to_post(raw) for raw in self._paginated(path, stop_at, required_scope)
+        )
 
     def bookmarks(self, limit: int) -> list[Post]:
         return self._posts("/api/v1/bookmarks", limit)
@@ -322,30 +329,9 @@ class HomeServer:
 
     def timeline(self, limit: int) -> list[Post]:
         """Get all post in the user's home timeline"""
-        url = f"https://{self.server}/api/v1/timelines/home"
-        try:
-            response = self._toots(url)
-            toots: list[Any] = response.json()
-
-            # Paginate as needed
-            while len(toots) < limit and 'next' in response.links:
-                response = self._toots(response.links['next']['url'])
-                toots = toots + response.json()
-        except Exception as ex:
-            logger.error(f"Error getting timeline toots: {ex}")
-            raise
-
-        logger.info(f"Found {len(toots)} toots in timeline")
-        return usable(to_post(raw) for raw in toots)
-
-    def _toots(self, url: str) -> Any:
-        response = self._http.get(url, headers=self._auth)
-        if response.status_code != 200:
-            report_mastodon_error(
-                f"Error getting URL {url}", response.status_code, self._token,
-                "read:statuses",
-            )
-        return response
+        posts = self._posts("/api/v1/timelines/home", limit, "read:statuses")
+        logger.info(f"Found {len(posts)} toots in timeline")
+        return posts
 
     def active_user_ids(self, reply_interval_hours: float) -> Iterator[str]:
         """user IDs on our server that have posted in the given time interval"""
