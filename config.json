@@ -5,5 +5,6 @@
   "max-followings": 150,
   "max-bookmarks": 80,
   "from-notifications": 1,
+  "from-lists": 1,
   "reply-interval-in-hours": 0
 }
