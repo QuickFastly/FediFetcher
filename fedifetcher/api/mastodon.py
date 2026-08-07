@@ -53,19 +53,25 @@ PROFILE_PATHS = (
 
 def to_post(raw: dict[str, Any]) -> Post | None:
     """A status from the Mastodon API, which our own server also speaks"""
-    url = raw.get("url")
-    created_at = parse_date(raw.get("created_at"))
+    raw_boost = raw.get("reblog")
+    boosted = to_post(raw_boost) if raw_boost is not None else None
+
+    # a boost is an empty wrapper: the server gives it no URL of its own, and
+    # the post worth reading is the one it carries
+    url = raw.get("url") or (boosted.url if boosted else None)
+    created_at = parse_date(raw.get("created_at")) or (
+        boosted.created_at if boosted else None
+    )
     if url is None or created_at is None:
         unusable("mastodon", raw.get("uri"))
         return None
 
-    boosted = raw.get("reblog")
     return Post(
         url=url,
         uri=raw.get("uri") or url,
         created_at=created_at,
         is_public=raw.get("visibility") in PUBLIC,
-        reblog=to_post(boosted) if boosted is not None else None,
+        reblog=boosted,
         in_reply_to_id=raw.get("in_reply_to_id"),
         in_reply_to_account_id=raw.get("in_reply_to_account_id"),
         reply_count=raw.get("replies_count"),
