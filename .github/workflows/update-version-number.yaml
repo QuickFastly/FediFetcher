@@ -53,6 +53,26 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Work out the image tags
+        id: tags
+        env:
+          REF: ${{ github.ref_name }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/fedifetcher
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "$IMAGE:$REF"
+            echo "$IMAGE:latest"
+            # Only an unsuffixed vX.Y.Z tag is a stable release; v8.1.0-rc1 is not.
+            # Pre-releases must not move the major and minor tags: someone pinned
+            # to v8 is asking for 8.x patches, not for a release candidate.
+            if [[ "$REF" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+              echo "$IMAGE:stable"
+              echo "$IMAGE:v${BASH_REMATCH[1]}"
+              echo "$IMAGE:v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Build and push
         id: docker_build
         uses: docker/build-push-action@v7
@@ -60,6 +80,4 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/fedifetcher:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/fedifetcher:latest
+          tags: ${{ steps.tags.outputs.tags }}

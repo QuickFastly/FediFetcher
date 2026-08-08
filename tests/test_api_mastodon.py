@@ -193,6 +193,20 @@ def test_a_boost_carries_the_post_it_boosts():
     assert post.original.url == "https://remote.example/@b/9"
 
 
+def test_a_boost_with_no_url_of_its_own_borrows_the_one_it_boosts():
+    post = built(to_post({
+        "uri": "https://our.example/users/a/statuses/1/activity", "url": None,
+        "created_at": WHEN, "visibility": "public",
+        "reblog": {"url": "https://remote.example/@b/9", "created_at": WHEN,
+                   "visibility": "public", "replies_count": 3},
+    }))
+
+    assert post.is_boost
+    assert post.url == "https://remote.example/@b/9"
+    assert post.uri == "https://our.example/users/a/statuses/1/activity"
+    assert post.original.reply_count == 3
+
+
 @pytest.mark.parametrize(
     "raw",
     [
