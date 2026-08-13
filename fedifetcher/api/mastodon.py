@@ -237,7 +237,8 @@ def report_mastodon_error(
 
 
 def get_paginated(
-    url: str, stop_at: int | datetime, headers: Mapping[str, str] | None = None,
+    url: str, stop_at: int | datetime | None,
+    headers: Mapping[str, str] | None = None,
     timeout: int | None = None, max_tries: int = 5, *, http: HttpClient,
     required_scope: str = '',
 ) -> list[Any]:
@@ -250,10 +251,15 @@ def get_paginated(
     of what it has, as we have to for other people's servers.
 
     `stop_at` is either how many entries are wanted, or the oldest creation
-    date worth having.
+    date worth having, or nothing at all to read unpaginated endpoints.
     """
     headers = headers or {}
-    next_url = f"{url}?limit={stop_at}" if isinstance(stop_at, int) else url
+    # what is wanted overall is not what a page will hold, and asking for more
+    # than a server will give is not always forgiven: Mastodon quietly trims an
+    # oversized limit, but Sharkey turns the request away with a 400
+    next_url = (
+        f"{url}?limit={min(stop_at, PAGE_SIZE)}" if isinstance(stop_at, int) else url
+    )
 
     result: list[Any] = []
     while True:
@@ -276,7 +282,9 @@ def get_paginated(
         next_url = response.links['next']['url']
 
 
-def _wants_more(result: list[Any], stop_at: int | datetime) -> bool:
+def _wants_more(result: list[Any], stop_at: int | datetime | None) -> bool:
+    if stop_at is None:
+        return True
     if isinstance(stop_at, int):
         return len(result) < stop_at
     return parser.parse(result[-1]['created_at']) >= stop_at
@@ -296,7 +304,7 @@ class HomeServer:
         return {"Authorization": f"Bearer {self._token}"}
 
     def _paginated(
-        self, path: str, stop_at: int | datetime, required_scope: str = ''
+        self, path: str, stop_at: int | datetime | None, required_scope: str = ''
     ) -> list[Any]:
         return get_paginated(
             f"https://{self.server}{path}", stop_at, self._auth, http=self._http,
@@ -332,7 +340,7 @@ class HomeServer:
         return self._accounts(f"/api/v1/accounts/{user_id}/following", limit)
 
     def lists(self) -> list[UserList]:
-        return usable(to_list(raw) for raw in self._paginated("/api/v1/lists", 99))
+        return usable(to_list(raw) for raw in self._paginated("/api/v1/lists", None))
 
     def list_timeline(self, list_id: str, limit: int) -> list[Post]:
         return self._posts(f"/api/v1/timelines/list/{list_id}", limit)

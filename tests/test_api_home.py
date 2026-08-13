@@ -46,6 +46,30 @@ def test_a_limit_becomes_a_query_parameter(home, http):
     assert http.get.call_args[0][0] == "https://example.social/api/v1/bookmarks?limit=5"
 
 
+def test_a_large_limit_is_capped_to_what_a_server_will_give(home, http):
+    """Sharkey refuses an oversized limit outright, where Mastodon just trims it"""
+    http.get.return_value = page([])
+    home.timeline(200)
+    assert http.get.call_args[0][0] == (
+        "https://example.social/api/v1/timelines/home?limit=40"
+    )
+
+
+def test_a_capped_first_page_still_pages_on_to_the_limit(home, http):
+    http.get.side_effect = [
+        page([status(n) for n in range(40)], next_url="https://example.social/next"),
+        page([status(n) for n in range(40, 80)]),
+    ]
+    assert len(home.timeline(80)) == 80
+    assert http.get.call_args_list[1][0][0] == "https://example.social/next"
+
+
+def test_lists_are_read_without_a_limit(home, http):
+    http.get.return_value = page([])
+    home.lists()
+    assert http.get.call_args[0][0] == "https://example.social/api/v1/lists"
+
+
 def test_pages_are_followed_until_the_limit_is_reached(home, http):
     http.get.side_effect = [
         page([status(1), status(2)], next_url="https://example.social/next"),
