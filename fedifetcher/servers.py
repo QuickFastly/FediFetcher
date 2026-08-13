@@ -33,10 +33,10 @@ class ApiFlavour(StrEnum):
 SOFTWARE_APIS: dict[ApiFlavour, frozenset[str]] = {
     ApiFlavour.MASTODON: frozenset({
         'mastodon', 'pleroma', 'akkoma', 'pixelfed', 'hometown', 'iceshrimp',
-        'Iceshrimp.NET',
+        'Iceshrimp.NET', 'fedibird', 'kmyblue', 'mitra',
     }),
     ApiFlavour.MISSKEY: frozenset({
-        'misskey', 'calckey', 'firefish', 'foundkey', 'sharkey',
+        'misskey', 'calckey', 'firefish', 'foundkey', 'sharkey', 'cherrypick',
     }),
     ApiFlavour.LEMMY: frozenset({'lemmy'}),
     ApiFlavour.PEERTUBE: frozenset({'peertube'}),

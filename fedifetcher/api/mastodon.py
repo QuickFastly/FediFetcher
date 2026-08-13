@@ -39,10 +39,15 @@ POST_PATHS = (
     re.compile(r"^https://[^/]+/p/[^/]+/(?P<name>[^/]+)"),
 )
 
-# Pleroma also addresses a post by an opaque object id, and only the redirect
+# Pleroma and Mitra also address a post by an opaque object id, and only the redirect
 # it serves says which notice that object is
 OBJECT_PATH = re.compile(r"^https://[^/]+/objects/[^/]+")
-REDIRECTED_NOTICE = (re.compile(r"/notice/(?P<name>[^/]+)"),)
+REDIRECTED_OBJECT_PATH = (
+    # Pleroma uses /notice/ as relative
+    re.compile(r"/notice/(?P<name>[^/]+)"),
+    # Mitra uses an absolute url containing /post/
+    re.compile(r"^https://[^/]+/post/(?P<name>[^/]+)"),
+)
 
 PROFILE_PATHS = (
     re.compile(r"^https://[^/]+/@(?P<name>[^/]+)"),
@@ -154,7 +159,7 @@ class MastodonApi:
             redirect = self._http.get_redirect_url(post_url)
             if redirect is None:
                 return None
-            return first_name_in(REDIRECTED_NOTICE, redirect)
+            return first_name_in(REDIRECTED_OBJECT_PATH, redirect)
         return first_name_in(POST_PATHS, post_url)
 
     def fetch_user_posts(
@@ -176,7 +181,7 @@ class MastodonApi:
     def _statuses(
         self, user_id: str, username: str, wanted: int, gathered: list[Any]
     ) -> list[Any] | None:
-        url = f"https://{self.webserver}/api/v1/accounts/{user_id}/statuses?limit={wanted}"
+        url = f"https://{self.webserver}/api/v1/accounts/{user_id}/statuses?exclude_replies=false&limit={wanted}"
         try:
             if gathered:
                 # everything older than the oldest status we already have

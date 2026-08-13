@@ -76,7 +76,7 @@ def test_user_posts_are_fetched_for_the_resolved_id(api, http, reply):
 
     assert [post.url for post in posts] == ["https://example.social/@someone/1"]
     assert http.get.call_args[0][0] == (
-        "https://example.social/api/v1/accounts/1234/statuses?limit=40"
+        "https://example.social/api/v1/accounts/1234/statuses?exclude_replies=false&limit=40"
     )
 
 
@@ -95,8 +95,20 @@ def test_more_posts_than_a_page_are_asked_for_from_the_last_one(api, http, reply
 
     assert len(posts) == 41
     assert http.get.call_args_list[2][0][0] == (
-        "https://example.social/api/v1/accounts/1234/statuses?limit=40&max_id=39"
+        "https://example.social/api/v1/accounts/1234/statuses?exclude_replies=false&limit=40&max_id=39"
     )
+
+
+def test_replies_are_requested_when_fetching_user_posts(api, http, reply):
+    """Mitra excludes replies unless asked; Mastodon and its kin include them anyway"""
+    http.get.side_effect = [
+        reply(200, {"id": "1234"}),
+        reply(200, []),
+    ]
+
+    api.fetch_user_posts("someone", "https://example.social/@someone", 40)
+
+    assert "exclude_replies=false" in http.get.call_args[0][0]
 
 
 def test_posts_from_a_page_we_cannot_read_are_kept(api, http, reply):
@@ -379,3 +391,10 @@ def test_an_object_that_redirects_somewhere_unexpected_cannot_be_read(api, http)
 
 def test_a_post_url_this_api_does_not_use(api):
     assert api.post_id_from("https://mstdn.example/notes/12345") is None
+
+
+def test_a_mitra_object_is_resolved_by_following_its_redirect(api, http):
+    http.get_redirect_url.return_value = "https://mitra.example/post/019ff65d-fa3d-76e2"
+
+    assert api.post_id_from("https://mitra.example/objects/abc-def") == "019ff65d-fa3d-76e2"
+    http.get_redirect_url.assert_called_once_with("https://mitra.example/objects/abc-def")
