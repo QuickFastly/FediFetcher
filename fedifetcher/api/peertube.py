@@ -26,7 +26,10 @@ CHANNEL_PATH = re.compile(r"^https://[^/]+/(?:video-channels|c)/")
 PROFILE_PATHS = (
     re.compile(r"^https://[^/]+/(?:accounts|a|video-channels|c)/(?P<name>[^/]+)"),
 )
-POST_PATHS = (re.compile(r"^https://[^/]+/videos/watch/(?P<name>[^/]+)"),)
+POST_PATHS = (
+    re.compile(r"^https://[^/]+/videos/watch/(?P<name>[^/]+)"),
+    re.compile(r"^https://[^/]+/w/(?!p/)(?P<name>[^/]+)"),
+)
 
 
 def to_post(raw: dict[str, Any]) -> Post | None:

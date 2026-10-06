@@ -156,11 +156,17 @@ def test_the_way_this_api_addresses_a_post(api):
     assert api.post_id_from(url) == "56f1d0b5-d98f-4bad-b1e7-648ae074ab9d"
 
 
+def test_this_api_can_extract_short_urls(api):
+    url = "https://video.example/w/wM3SN4PVViQLoa4swz6iMe"
+    assert api.post_id_from(url) == "wM3SN4PVViQLoa4swz6iMe"
+
+
 @pytest.mark.parametrize(
     "post_url",
     [
-        "https://video.example/watch/123456789",   # missing the /videos/ prefix
-        "https://video.example/videos/123456789",  # missing the /watch/ part
+        "https://video.example/watch/123456789",               # missing the /videos/ prefix
+        "https://video.example/videos/123456789",              # missing the /watch/ part
+        "https://video.example/w/p/wM3SN4PVViQLoa4swz6iMe",    # a playlist url
     ],
 )
 def test_a_post_url_this_api_does_not_use(api, post_url):
